@@ -5,6 +5,9 @@ var DPD_CSS = `
 .dpd-panel.is-collapsed .dpd-body{display:none}
 .dpd-panel.is-collapsed .dpd-head-text,.dpd-panel.is-collapsed .dpd-head-actions{opacity:0;pointer-events:none}
 @media (prefers-color-scheme:dark){.dpd-panel{--md-primary:#D0BCFF;--md-on-primary:#381E72;--md-primary-container:#4F378B;--md-on-primary-container:#EADDFF;--md-secondary-container:#4A4458;--md-on-secondary-container:#E8DEF8;--md-tertiary-container:#633B48;--md-on-tertiary-container:#FFD8E4;--md-surface-container-low:#1D1B20;--md-surface-container:#211F26;--md-surface-container-high:#2B2930;--md-surface-container-highest:#36343B;--md-on-surface:#E6E0E9;--md-on-surface-variant:#CAC4D0;--md-outline:#938F99;--md-outline-variant:#49454F;--md-error:#F2B8B5;--md-on-error:#601410;--md-error-container:#8C1D18;--md-on-error-container:#F9DEDC;--md-ok:#7DD58F;--md-warn:#F0C24B;--md-hover:rgba(230,224,233,.08)}}
+/* comipo Play 是绿色换皮站，检测到后整块面板换成绿色主色（品牌色 #43c453 对应的 M3 绿色系）。 */
+.dpd-panel.is-comipo{--md-primary:#1B6C2D;--md-on-primary:#fff;--md-primary-container:#A5F4A9;--md-on-primary-container:#002105;--md-tertiary-container:#C3F0C7;--md-on-tertiary-container:#00210A}
+@media (prefers-color-scheme:dark){.dpd-panel.is-comipo{--md-primary:#8AD68F;--md-on-primary:#003912;--md-primary-container:#00531C;--md-on-primary-container:#A5F4A9;--md-tertiary-container:#2C5C33;--md-on-tertiary-container:#C6F3C9}}
 .dpd-head{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;-webkit-user-select:none;user-select:none;border-bottom:1px solid var(--md-outline-variant);transition:background .15s}
 .dpd-head:hover{background:var(--md-hover)}
 .dpd-panel.is-collapsed .dpd-head{border-bottom:0}
@@ -116,6 +119,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			attaching: false,
 			detected: false,
 			method: "",
+			platform: "dlsite",
 			zipFileName: "",
 			error: "",
 			mode: "image",
@@ -193,12 +197,48 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			const range = normalizedRange();
 			return range.to - range.from + 1;
 		}
+		/**
+		 * 取第一个「真的拿到作品数据」的检测结果。
+		 * 单个检测器可能因为当前作品/接口不存在而解析出空结果，不能让它把整体拖住，
+		 * 只有全部检测器都失败（或返回空）时才报错。
+		 */
+		function waitForUsableDetector(detectors) {
+			return new Promise((resolve, reject) => {
+				const list = detectors.filter(Boolean);
+				if (list.length === 0) {
+					reject(new Error("没有可用的检测方式"));
+					return;
+				}
+				let pending = list.length;
+				let lastError = null;
+				let done = false;
+				list.forEach((item) => {
+					Promise.resolve(item).then((value) => {
+						if (done) return;
+						if (value && value.data) {
+							done = true;
+							resolve(value);
+							return;
+						}
+						pending -= 1;
+						if (pending === 0) reject(lastError || new Error("没能识别该作品的加密方式"));
+					}).catch((err) => {
+						lastError = err;
+						pending -= 1;
+						if (!done && pending === 0) reject(lastError);
+					});
+				});
+			});
+		}
 		function attachEncMethod() {
 			if (state.attaching || state.detected) return;
 			const version = stateVersion;
 			state.attaching = true;
 			addLog("正在检测加密方式…");
-			Promise.race([hookXorEnc(), hookFetchPuzzle()]).then((result) => {
+			const workNo = extractDlsiteId(window.location.href);
+			// comipo Play：优先自己解析内容接口（不依赖页面请求的时机），失败再等页面自身的请求。
+			const detectors = state.platform === "comipo" ? [resolveComipoPages(workNo), hookXorEnc()] : [hookXorEnc(), hookFetchPuzzle()];
+			waitForUsableDetector(detectors).then((result) => {
 				if (version !== stateVersion) return;
 				const data = result.data || {};
 				job = data;
@@ -417,12 +457,12 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		function headerSubtitle() {
 			if (state.error) return "出错，详见日志";
 			if (state.attaching) return "正在检测加密方式…";
-			if (!state.detected) return "等待作品页";
+			if (!state.detected) return state.platform === "comipo" ? "comipo · 等待作品页" : "等待作品页";
 			const done = state.success + state.failed + state.skipped;
 			if (state.running) return `下载中 ${done}/${state.total}${state.zipping ? " · 打包中" : ""}${state.cancelled ? " · 正在取消" : ""}`;
 			if (state.cancelled) return `已取消：成功 ${state.success} / 失败 ${state.failed}${state.skipped ? ` / 跳过 ${state.skipped}` : ""}`;
 			if (state.finished) return `完成：成功 ${state.success} / 失败 ${state.failed}`;
-			return `${state.method === "xor" ? "XOR 解密" : "拼图还原"} · 共 ${state.pageCount} 页`;
+			return `${state.platform === "comipo" ? "comipo · " : ""}${state.method === "xor" ? "XOR 解密" : "拼图还原"} · 共 ${state.pageCount} 页`;
 		}
 		function visibleEntries() {
 			const list = state.onlyFailed ? state.entries.filter((entry) => entry.status === "error") : state.entries;
@@ -646,6 +686,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		}
 		function pathnameUpdated() {
 			pastLocationKey = window.location.href;
+			state.platform = detectPlayPlatform(window.location.href);
 			resetState();
 			if (extractDlsiteId(window.location.href)) attachEncMethod();
 		}
@@ -675,7 +716,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 				// 作品信息在子帧里检测到了，顶层让位，避免空面板遮挡。
 				return null;
 			}
-			return h("div", { class: ["dpd-panel", state.collapsed ? "is-collapsed" : ""] }, [
+			return h("div", { class: ["dpd-panel", state.collapsed ? "is-collapsed" : "", state.platform === "comipo" ? "is-comipo" : ""] }, [
 			h("div", {
 				class: "dpd-head",
 				title: state.collapsed ? "点击展开" : "点击收起",
@@ -689,13 +730,13 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 					h("div", { class: "dpd-sub" }, headerSubtitle())
 				]),
 				h("div", { class: "dpd-head-actions" }, [
-					state.detected ? h("span", { class: ["dpd-chip", state.method === "xor" ? "is-xor" : ""] }, state.method === "xor" ? "XOR" : "拼图") : null,
+					state.detected || state.platform === "comipo" ? h("span", { class: ["dpd-chip", state.method === "xor" ? "is-xor" : ""] }, state.platform === "comipo" ? "comipo" : state.detected ? state.method === "xor" ? "XOR" : "拼图" : "检测中") : null,
 					h("button", { class: "dpd-ghost", title: state.collapsed ? "展开" : "收起" }, state.collapsed ? "‹" : "›")
 				])
 			]),
 			h("div", { class: "dpd-body" }, [
 				state.error ? h("div", { class: "dpd-alert" }, state.error) : null,
-				!state.detected ? h("div", { class: "dpd-hint" }, state.attaching ? "正在检测该作品的加密方式…" : "打开 DLsite Play 作品阅读页后自动检测") : null,
+				!state.detected ? h("div", { class: "dpd-hint" }, state.attaching ? "正在检测该作品的加密方式…" : state.platform === "comipo" ? "打开 comipo Play 作品阅读页后自动检测" : "打开 DLsite Play 作品阅读页后自动检测") : null,
 				state.detected ? sectionRange() : null,
 				state.detected ? sectionMode() : null,
 				state.detected ? sectionNaming() : null,

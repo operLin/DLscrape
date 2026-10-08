@@ -18,9 +18,14 @@ const part = (name) => {
 
 // 行号基于原始 dlsite.txt（1 起，含端点）。
 const replacements = [
+	{ name: "work-id", start: 3013, end: 3015, text: part("00-work-id.js") },
 	{ name: "puzzle-page-list", start: 3051, end: 3058, text: part("01-puzzle-resolve.js") },
+	{ name: "content-api", start: 3071, end: 3112, text: part("06-content-api.js") },
 	{ name: "download-engine", start: 3195, end: 3336, text: part("02-engine.js") },
-	{ name: "xor-page-list", start: 7971, end: 7979, text: part("03-xor-resolve.js") },
+	// 7956-7999 覆盖了原区间 7971-7979（原 03-xor-resolve.js 的内容已并入 07-xor-enc.js）
+	{ name: "xor-enc", start: 7956, end: 7999, text: part("07-xor-enc.js") },
+	{ name: "enc-bin-urls", start: 8000, end: 8024, text: part("08-enc-bin-urls.js") },
+	{ name: "xor-hooks", start: 8025, end: 8084, text: part("09-xor-hooks.js") },
 	{ name: "xor-page-fetch", start: 8115, end: 8194, text: part("04-xor-fetch.js") },
 	{ name: "ui-rewrite", start: 8253, end: 8446, text: part("05-app.js") }
 ];
@@ -40,9 +45,13 @@ const expectStart = (line, needle) => {
 		throw new Error(`第 ${line} 行起点校验失败，期望包含 ${JSON.stringify(needle)}，实际为 ${JSON.stringify(lines[line - 1].slice(0, 80))}`);
 	}
 };
+expectStart(3013, "function extractDlsiteId(url) {");
 expectStart(3051, "resolve({");
+expectStart(3071, "async function getDownloadCredential(workNo) {");
 expectStart(3195, "async function downloadPuzzleImagesToZip");
-expectStart(7971, "resolve({");
+expectStart(7956, "var hookXorEnc = () => {");
+expectStart(8000, "function extractNumberOrKeepOriginal(str) {");
+expectStart(8025, "/**");
 expectStart(8115, "var downloadAndDecryptToZip");
 expectStart(8253, "var _hoisted_1");
 expectStart(8446, "}");
@@ -69,9 +78,9 @@ text = text.replace(beforeSetter, afterSetter);
 const FORK = {
 	name: "DLscrape",
 	author: "cpufan, operLin",
-	version: "2.3.0",
+	version: "2.4.0",
 	repo: "https://github.com/operLin/DLscrape",
-	description: "在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名）"
+	description: "在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名、支持 comipo Play）"
 };
 
 const headerRewrites = [

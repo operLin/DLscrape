@@ -16,11 +16,11 @@
 ```powershell
 node build/apply.mjs          # 生成 / 刷新改进版 userscript
 node --check ..\DLscrape.user.js   # 语法校验
-node build/verify.mjs         # 拼接完整性 + 悬挂引用 + 下载内核 + UI 渲染桩测试 + 头部元数据（52 项）
+node build/verify.mjs         # 拼接完整性 + 悬挂引用 + 下载内核 + UI 渲染桩测试 + 头部元数据（68 项）
 
 # 真实 Vue + jsdom 集成测试（需一次性安装测试依赖，见 build/package.json）
 cd build; npm i; cd ..
-node build/dom-test.mjs       # 26 项
+node build/dom-test.mjs       # 32 项
 ```
 
 `apply.mjs` 会在替换前对每个区间的**起始行做内容断言**，行号漂移时直接报错而不是静默改错地方。
@@ -32,10 +32,14 @@ node build/dom-test.mjs       # 26 项
 
 | 行区间 | 内容 | 片段 |
 |---|---|---|
+| 3013–3015 | `extractDlsiteId` → 平台识别（`detectPlayPlatform`）+ 兼容 comipo 路由的作品号提取 | `parts/00-work-id.js` |
 | 3051–3058 | `hookFetchPuzzle` 的 resolve：由「一次性 download 回调」改为「页列表 + 单页 loader」 | `parts/01-puzzle-resolve.js` |
+| 3071–3112 | 下载凭据 / ziptree / 作品元信息改为平台感知，并新增 comipo 主动解析 `resolveComipoPages` | `parts/06-content-api.js` |
 | 3195–3336 | 旧 `downloadPuzzleImagesToZip` / `restorePuzzleImage` 等 → 新下载内核 | `parts/02-engine.js` |
-| 7971–7979 | `hookXorEnc` 的 resolve：同上改为页列表 | `parts/03-xor-resolve.js` |
-| 8115–8194 | 旧 `downloadAndDecryptToZip` → 单页 XOR 抓取器 | `parts/04-xor-fetch.js` |
+| 7956–7999 | `hookXorEnc` 的 resolve：改为页列表 + 检测超时；`makeArtworkSaveName` 加空值保护 | `parts/07-xor-enc.js` |
+| 8000–8024 | `makeEncBinUrls`：支持没有 `.enc` 编号的 URL（comipo 的签名 query 原样保留） | `parts/08-enc-bin-urls.js` |
+| 8025–8084 | 密钥/页面请求钩子：新增 comipo 接口与图片 URL 匹配，元信息钩子不再阻塞检测 | `parts/09-xor-hooks.js` |
+| 8115–8194 | 旧 `downloadAndDecryptToZip` → 单页 XOR 抓取器（支持 hex 文本密钥与 comipo 密钥形态） | `parts/04-xor-fetch.js` |
 | 8253–8446 | 旧的编译模板 App → 手写 `h()` 渲染的新 UI + 新 CSS | `parts/05-app.js` |
 | 第 25 行 | 给 SystemJS 的 `vue` 命名空间补 `h`（`var ref,createApp,h,warn,` + `h=module.h;`） | 由 `apply.mjs` 做字符串替换 |
 
@@ -56,6 +60,15 @@ node build/dom-test.mjs       # 26 项
    - 原始：保留 DLsite 原名，仅把扩展名校正为实际输出格式。
 5. **任务进度面板** — 进度条 + 成功/失败计数 + 逐页状态列表（等待/下载中/成功/失败原因），
    可按「全部 / 失败」筛选；另有带时间戳的日志区。支持取消下载。
+6. **comipo Play 支持** — 除了 DLsite Play，同一套脚本也支持 comipo 的换皮阅读器
+   （`https://play.comipo.app/viewer/sample/<作品号>`、`/viewer/free/<作品号>`）。检测到 comipo 时
+   整个面板切换为绿色 M3 主题（`.dpd-panel.is-comipo` 覆盖 primary 一系 token），标题副行与徽章显示
+   `comipo`。检测走**主动解析**：`POST /api/comipo/sample/viewer/token/<no>`（免费作品走
+   `/viewer/free/` 分支）拿到带 S3 签名的内容前缀 → `viewer-meta.json` 取页表与
+   `decryption.key`（64 位 hex 文本）→ 每页 `.enc` XOR 解密后按文件头嗅探（WebP/JPEG/PNG）再按用户
+   选择的 JPG/PNG 输出。主动解析失败（例如接口变更、需要登录的付费内容）时自动回退到原有的被动
+   hook 检测；检测竞速会忽略「没有页数据」的空结果，并且元信息钩子有 6 秒上限、整体检测有 20 秒上限，
+   不会再像原版那样静默卡在「正在检测加密方式…」。
 
 ## 关键约定
 
@@ -70,6 +83,9 @@ node build/dom-test.mjs       # 26 项
   `.dlsite-play-downloader-vue` / `.dpd-panel` / 原版 `.plugin-area` 宿主；同时通过
   `top.__dpdHostState`（`yieldToSubFrame()`）让真正检测到加密方式的那一帧显示面板，避免顶层与
   iframe 各挂一个却都停在「正在检测加密方式…」。
+- comipo 的检测器与 DLsite 的拼图检测器**互斥**：`state.platform === "comipo"` 时只用
+  `[resolveComipoPages(workNo), hookXorEnc()]`，DLsite 页面上仍是 `[hookXorEnc(), hookFetchPuzzle()]`；
+  `waitForUsableDetector()` 会丢弃 `null`/无 `data` 的结果，全部失败才把错误显示到面板上。
 - 取消语义：取消后仍会把剩余页面逐个派发，但它们不做任何网络请求、直接记为 `skipped`，
   因此 `成功 + 失败 + 跳过 === 总数` 恒成立、进度条必然走到 100%。取消不会把任务标记为「已完成」；
   压缩包模式中途取消时按钮变为「保存不完整压缩包」，避免把残缺压缩包当成完整结果。

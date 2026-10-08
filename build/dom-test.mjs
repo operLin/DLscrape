@@ -66,6 +66,16 @@ const pages = Array.from({ length: 6 }, (_, index) => ({
 // 模拟 unsafeWindow：用于验证「同一文档只挂载一个面板」的单例标记
 const fakeUnsafeWindow = {};
 
+// comipo Play 场景的开关（detectPlayPlatform 桩读它，用于在同一个模块里跑两种平台）
+let comipoMode = false;
+let comipoResolveCalls = 0;
+let puzzleHookCalls = 0;
+const comipoPages = Array.from({ length: 3 }, (_, index) => ({
+	pageNo: index + 1,
+	originalName: `0e25_kyoran_2048_09_00${index + 1}.enc`,
+	load: async () => ({ blob: new Blob([new Uint8Array([1, 2, 3])]), ext: "jpg" })
+}));
+
 const factory = new Function(
 	"zip",
 	"origConsole",
@@ -81,6 +91,8 @@ const factory = new Function(
 	"createApp",
 	"nextTick",
 	"extractDlsiteId",
+	"detectPlayPlatform",
+	"resolveComipoPages",
 	"hookXorEnc",
 	"hookFetchPuzzle",
 	"_unsafeWindow",
@@ -106,8 +118,24 @@ const api = factory(
 	Vue.createApp,
 	Vue.nextTick,
 	() => "BJ123456",
+	() => comipoMode ? "comipo" : "dlsite",
+	async () => {
+		comipoResolveCalls++;
+		if (!comipoMode) return null;
+		return {
+			method: "xor",
+			data: {
+				zipFileName: "comipo-title",
+				key: "b83cbc45512c27e80ea3cfffdb9a03b3a693eb4139cd5b9b5e2a52a798d64e60",
+				pages: comipoPages
+			}
+		};
+	},
 	() => new Promise(() => {}),
-	() => Promise.resolve({ method: "puzzle", data: { zipFileName: "work-title", pages } }),
+	() => {
+		puzzleHookCalls++;
+		return Promise.resolve({ method: "puzzle", data: { zipFileName: "work-title", pages } });
+	},
 	fakeUnsafeWindow
 );
 
@@ -370,6 +398,55 @@ startRun();
 await flush();
 check("原始命名：保留 DLsite 原始文件名（仅校正扩展名）", () => {
 	assert(JSON.stringify(clicked) === JSON.stringify(["hash_2.png", "hash_3.png", "hash_4.png"]), JSON.stringify(clicked));
+});
+
+console.log("\n[DOM] comipo Play：绿色主题与独立检测链路");
+
+comipoMode = true;
+comipoResolveCalls = 0;
+puzzleHookCalls = 0;
+const comipoContainer = window.document.createElement("div");
+window.document.body.appendChild(comipoContainer);
+Vue.createApp(api.App_default).mount(comipoContainer);
+await flush();
+
+const comipoPanel = () => window.document.querySelector(".dpd-panel.is-comipo");
+const comipoText = () => comipoPanel()?.textContent ?? "";
+const comipoButton = (label) => [...(comipoPanel()?.querySelectorAll("button") ?? [])].find((el) => el.textContent.trim() === label);
+
+check("comipo 作品页挂载出绿色主题面板", () => {
+	const panel = comipoPanel();
+	assert(panel, "未找到 .dpd-panel.is-comipo");
+	assert(panel.textContent.includes("comipo"), panel.textContent.slice(0, 120));
+});
+
+check("comipo 检测完成并显示页数", () => {
+	assert(comipoText().includes("共 3 页"), comipoText().slice(0, 200));
+});
+
+check("comipo 走独立解析链路，不触发 DLsite 拼图检测", () => {
+	assert(comipoResolveCalls === 1, `resolveComipoPages 调用 ${comipoResolveCalls} 次`);
+	assert(puzzleHookCalls === 0, `comipo 页面上 hookFetchPuzzle 被调用 ${puzzleHookCalls} 次`);
+});
+
+check("comipo 面板保留全部下载设置", () => {
+	const text = comipoText();
+	assert(text.includes("页码范围"), "缺少页码范围");
+	assert(text.includes("逐页") && text.includes("压缩"), "缺少模式滑块");
+	assert(text.includes("JPG") && text.includes("PNG"), "缺少格式滑块");
+	assert(text.includes("按页号重命名"), "缺少命名提示");
+});
+
+clicked.length = 0;
+comipoButton("开始下载").click();
+await flush();
+
+check("comipo 逐页下载按页号命名", () => {
+	assert(JSON.stringify(clicked) === JSON.stringify(["001.jpg", "002.jpg", "003.jpg"]), JSON.stringify(clicked));
+});
+
+check("comipo 解码后的页面计入成功明细", () => {
+	assert(comipoText().includes("成功 3"), comipoText().slice(-400));
 });
 
 // 放在最后：mountApp 的清场逻辑会移除当前挂在 #app 里的活面板

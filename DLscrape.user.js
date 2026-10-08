@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         DLscrape
 // @namespace    https://github.com/operLin/DLscrape
-// @version      2.3.0
+// @version      2.4.0
 // @author       cpufan, operLin
-// @description  在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名）
+// @description  在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名、支持 comipo Play）
 // @license      MIT
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=dlsite.com
 // @supportURL   https://github.com/operLin/DLscrape/issues
@@ -3010,8 +3010,41 @@ var origConsole = (() => {
 * 中提取BJ366185
 * @param url
 */
+var COMIPO_ORIGIN = "https://play.comipo.app";
+var COMIPO_CONTENT_ORIGIN = "https://dl.comipo.app";
+/**
+ * 判断当前页面属于哪个平台。
+ * - comipo Play 是 DLsite Play 的换皮版（play.comipo.app / dl.comipo.app），
+ *   路由为 /viewer/sample/:id、/viewer/free/:id，品牌色是绿色 (#43c453)。
+ * - 其余按 DLsite Play 处理。
+ * @param url
+ * @returns {"comipo"|"dlsite"}
+ */
+function detectPlayPlatform(url) {
+	const href = typeof url === "string" && url.length > 0 ? url : String(_unsafeWindow.location.href);
+	try {
+		const parsed = new URL(href, _unsafeWindow.location.href);
+		const host = parsed.hostname.toLowerCase();
+		if (/(^|\.)comipo\.app$/.test(host)) return "comipo";
+		if (/(^|\.)dlsite\.com$/.test(host)) return "dlsite";
+		if (/^\/viewer\/(sample|free)\//.test(parsed.pathname)) return "comipo";
+	} catch (err) {
+		origConsole.debug("[platform] URL 解析失败，按字符串判断", err);
+	}
+	if (/(^|\/\/|\.)comipo\.app\//i.test(href) || /\/viewer\/(sample|free)\//.test(href)) return "comipo";
+	return "dlsite";
+}
+/**
+ * 从作品阅读页 URL 中提取作品号。
+ * - DLsite Play：https://play.dlsite.com/work/BJ366185/viewer
+ * - DLsite Play 免费试读：https://play.dlsite.com/viewer/free/BJ366185
+ * - comipo Play：https://play.comipo.app/viewer/sample/BJ03045050
+ *   https://play.comipo.app/viewer/free/BJ03045050
+ * @param url
+ */
 function extractDlsiteId(url) {
-	return url.match(/work\/([A-Z\d]+)\//)?.[1] ?? url.match(/\/viewer\/free\/([A-Z\d]+)/)?.[1] ?? null;
+	const text = typeof url === "string" ? url : String(url || "");
+	return text.match(/work\/([A-Z\d]+)\//)?.[1] ?? text.match(/\/viewer\/(?:free|sample)\/([A-Z\d]+)/)?.[1] ?? text.match(/[?&]workno=([A-Z\d]+)/i)?.[1] ?? null;
 }
 var PUZZLE_BLOCK_SIZE = 128;
 var DETECT_RETRY_DELAYS = [
@@ -3072,34 +3105,37 @@ function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 async function getDownloadCredential(workNo) {
-	const url = new URL("https://play.dl.dlsite.com/api/download/sign/cookie");
+	const platform = detectPlayPlatform(_unsafeWindow.location.href);
+	const url = platform === "comipo" ? new URL(`${COMIPO_CONTENT_ORIGIN}/api/comipo/v3/download/sign/cookie`) : new URL("https://play.dl.dlsite.com/api/download/sign/cookie");
 	url.searchParams.set("workno", workNo);
 	const response = await pageFetch(url.href, {
 		method: "GET",
 		credentials: "include",
-		referrer: "https://play.dlsite.com/",
+		referrer: platform === "comipo" ? `${COMIPO_ORIGIN}/` : "https://play.dlsite.com/",
 		headers: { Accept: "*/*" }
 	});
 	if (!response.ok) throw new Error(`download credential failed: ${response.status} ${response.statusText}`);
 	return response.json();
 }
 async function getZipTree(downloadPrefix) {
+	const platform = detectPlayPlatform(_unsafeWindow.location.href);
 	const response = await pageFetch(`${downloadPrefix}ziptree.json`, {
 		method: "GET",
 		credentials: "include",
-		referrer: "https://play.dlsite.com/",
+		referrer: platform === "comipo" ? `${COMIPO_ORIGIN}/` : "https://play.dlsite.com/",
 		headers: { Accept: "application/json,*/*" }
 	});
 	if (!response.ok) throw new Error(`ziptree download failed: ${response.status} ${response.statusText}`);
 	return response.json();
 }
 async function getWorkMeta(workNo) {
-	const origins = Array.from(/* @__PURE__ */ new Set([_unsafeWindow.location.origin, "https://play.dlsite.com"]));
-	for (const origin of origins) {
-		const response = await pageFetch(`${origin}/api/work/${workNo}`, {
+	const platform = detectPlayPlatform(_unsafeWindow.location.href);
+	const targets = platform === "comipo" ? [`${COMIPO_ORIGIN}/api/comipo/viewer/work/${workNo}`, `${COMIPO_ORIGIN}/api/comipo/v3/work/${workNo}`] : Array.from(/* @__PURE__ */ new Set([`${_unsafeWindow.location.origin}/api/work/${workNo}`, `https://play.dlsite.com/api/work/${workNo}`]));
+	for (const target of targets) {
+		const response = await pageFetch(target, {
 			method: "GET",
 			credentials: "include",
-			referrer: `${origin}/`,
+			referrer: `${target.split("/api/")[0]}/`,
 			headers: { Accept: "application/json,*/*" }
 		}).catch(() => null);
 		if (response?.ok) return response.json();
@@ -3112,6 +3148,163 @@ function pageFetch(...args) {
 function normalizeDownloadPrefix(url) {
 	if (typeof url !== "string" || url.length === 0) return null;
 	return url.endsWith("/") ? url : `${url}/`;
+}
+/**
+ * comipo Play（DLsite Play 换皮版）内容解析。
+ *
+ * comipo 的阅读页与 DLsite Play 一样是「viewer-meta.json 描述页面 + 逐页 .enc 文件 + XOR 密钥」：
+ *   POST /api/comipo/sample/viewer/token/<workno>  -> { prefix, parameters }（试读，公开）
+ *   POST /api/comipo/free/viewer/token/<workno>    -> { prefix, parameters, key }（免费作品）
+ *   GET  /api/comipo/free/token/<workno>           -> 下载用的前缀（注意：它下面没有 viewer-meta.json）
+ *   GET  <prefix>/viewer-meta.json?<parameters>    -> { meta_data, pages: [{ src, key, page_number }] }
+ *   GET  <prefix>/decryption.key?<parameters>      -> 64 位 hex 文本，即 XOR 密钥
+ *   GET  <prefix>/<pages[].src>?<parameters>       -> XOR 加密的页面文件（WebP/JPEG/PNG）
+ * 这些接口都不需要 hook 页面请求就能拿到，所以 comipo 上优先直接解析；失败时再退回等页面自身请求。
+ * @returns {Promise<null|{method: string, data: object}>}
+ */
+async function resolveComipoPages(workNo) {
+	if (!workNo || detectPlayPlatform(_unsafeWindow.location.href) !== "comipo") return null;
+	const pathname = String(_unsafeWindow.location.pathname || "");
+	const isFreeViewer = /\/viewer\/free\//.test(pathname);
+	// 依次尝试几种 token 接口，只有「拿到的前缀下真能读到 viewer-meta.json」的那个才算数：
+	// GET 版 token 返回的是下载前缀，viewer 前缀只由 POST 版给出，所以不能只看接口是否 200。
+	const candidates = isFreeViewer ? [() => postComipoFreeViewerToken(workNo), () => getComipoSampleToken(workNo), () => getComipoFreeToken(workNo)] : [() => getComipoSampleToken(workNo), () => postComipoFreeViewerToken(workNo)];
+	let content = null;
+	for (const getToken of candidates) {
+		let token = null;
+		try {
+			token = await getToken();
+		} catch (err) {
+			origConsole.debug("[comipo] 该 token 接口不可用", err);
+			continue;
+		}
+		const prefix = typeof token?.prefix === "string" ? token.prefix.replace(/\/+$/, "") : "";
+		if (!prefix) continue;
+		const viewerMeta = await loadComipoViewerMeta(prefix, token.parameters);
+		if (!viewerMeta) continue;
+		content = {
+			prefix,
+			search: buildContentSearch(token.parameters),
+			viewerMeta
+		};
+		break;
+	}
+	if (!content) return null;
+	const { prefix, search, viewerMeta } = content;
+	const contentUrl = (file) => `${prefix}/${String(file).replace(/^\/+/, "")}${search}`;
+	let key = "";
+	try {
+		const keyFile = viewerMeta.pages.find((page) => page && typeof page.key === "string" && page.key.length > 0)?.key || "decryption.key";
+		const response = await pageFetch(contentUrl(keyFile), {
+			method: "GET",
+			credentials: "include",
+			referrer: `${COMIPO_ORIGIN}/`,
+			headers: { Accept: "*/*" }
+		});
+		if (response.ok) key = (await response.text()).trim();
+	} catch (err) {
+		origConsole.warn("[comipo] XOR 密钥读取失败，将按未加密处理", err);
+	}
+	const workMeta = await getWorkMeta(workNo).catch(() => null);
+	const pages = viewerMeta.pages.filter((page) => page && typeof page.src === "string" && page.src.length > 0).map((page, index) => ({
+		pageNo: index + 1,
+		originalName: String(page.src),
+		load: (loadOptions) => fetchXorPage({ url: contentUrl(page.src) }, key, loadOptions)
+	}));
+	if (pages.length === 0) return null;
+	// 免费作品的 token 里带回的是 RSA 处理过的密钥，我们未必解得开。先试下第一页：
+	// 解出来不是图片就说明这条路走不通，交回给「等页面自身请求」的 hook 链路。
+	if (isFreeViewer) {
+		const probe = await pages[0].load({ format: "jpg", quality: 0.8 }).catch(() => null);
+		if (!probe || String(probe.mime || "").indexOf("image/") !== 0) {
+			origConsole.warn("[comipo] 免费作品的内容前缀能读到，但密钥对不上，改为等待页面自身的请求");
+			return null;
+		}
+	}
+	origConsole.log(`[comipo] 直接解析成功：${pages.length} 页${key ? "（含 XOR 密钥）" : "（无密钥）"}`);
+	return {
+		method: "xor",
+		data: {
+			zipFileName: makeComipoSaveName(workNo, viewerMeta, workMeta),
+			key,
+			pages
+		}
+	};
+}
+/** 读取 comipo 内容前缀下的 viewer-meta.json，拿不到（或页数为空）返回 null。 */
+async function loadComipoViewerMeta(prefix, parameters) {
+	const url = `${prefix}/viewer-meta.json${buildContentSearch(parameters)}`;
+	try {
+		const response = await pageFetch(url, {
+			method: "GET",
+			credentials: "include",
+			referrer: `${COMIPO_ORIGIN}/`,
+			headers: { Accept: "application/json,*/*" }
+		});
+		if (!response.ok) {
+			origConsole.debug(`[comipo] viewer-meta.json ${response.status}：${url}`);
+			return null;
+		}
+		const json = await response.json();
+		return json && Array.isArray(json.pages) && json.pages.length > 0 ? json : null;
+	} catch (err) {
+		origConsole.debug("[comipo] viewer-meta.json 请求异常", err);
+		return null;
+	}
+}
+/** comipo 内容 token：试读作品走 POST sample/viewer/token。 */
+async function getComipoSampleToken(workNo) {
+	const response = await pageFetch(`${COMIPO_ORIGIN}/api/comipo/sample/viewer/token/${encodeURIComponent(workNo)}`, {
+		method: "POST",
+		credentials: "include",
+		referrer: `${COMIPO_ORIGIN}/`,
+		headers: { Accept: "application/json,*/*", "Content-Type": "application/json" },
+		body: "{}"
+	});
+	if (!response.ok) throw new Error(`comipo sample token failed: ${response.status} ${response.statusText}`);
+	return response.json();
+}
+/** comipo 内容 token：免费作品的阅读页走 POST free/viewer/token（body 情形未知，失败就换下一个候选）。 */
+async function postComipoFreeViewerToken(workNo) {
+	const response = await pageFetch(`${COMIPO_ORIGIN}/api/comipo/free/viewer/token/${encodeURIComponent(workNo)}`, {
+		method: "POST",
+		credentials: "include",
+		referrer: `${COMIPO_ORIGIN}/`,
+		headers: { Accept: "application/json,*/*", "Content-Type": "application/json" },
+		body: JSON.stringify({
+			play_type: 2,
+			revision: 0,
+			public_key: ""
+		})
+	});
+	if (!response.ok) throw new Error(`comipo free viewer token failed: ${response.status} ${response.statusText}`);
+	return response.json();
+}
+/** comipo 内容 token：免费作品的下载前缀（GET 版）。 */
+async function getComipoFreeToken(workNo) {
+	const response = await pageFetch(`${COMIPO_ORIGIN}/api/comipo/free/token/${encodeURIComponent(workNo)}`, {
+		method: "GET",
+		credentials: "include",
+		referrer: `${COMIPO_ORIGIN}/`,
+		headers: { Accept: "application/json,*/*" }
+	});
+	if (!response.ok) throw new Error(`comipo free token failed: ${response.status} ${response.statusText}`);
+	return response.json();
+}
+function buildContentSearch(parameters) {
+	const search = new URLSearchParams();
+	Object.entries(parameters || {}).forEach(([name, value]) => {
+		if (value !== void 0 && value !== null) search.set(name, String(value));
+	});
+	const text = search.toString();
+	return text ? `?${text}` : "";
+}
+function makeComipoSaveName(workNo, viewerMeta, workMeta) {
+	const meta = viewerMeta?.meta_data || {};
+	const title = meta.title || pickLocalized(workMeta?.name) || workNo;
+	const creator = Array.isArray(meta.creator) ? meta.creator.filter(Boolean).join(" ") : pickLocalized(meta.creator);
+	const maker = creator || pickLocalized(workMeta?.maker?.name);
+	return sanitizeFileName(maker ? `[${workNo}] (${maker}) ${title}` : `[${workNo}] ${title}`);
 }
 function collectPuzzleFiles(zipTree) {
 	const result = [];
@@ -8118,8 +8311,20 @@ var FileTypeParser = class FileTypeParser {
 };
 new Set(extensions);
 new Set(mimeTypes);
+/** 等待页面自身请求（页面文件 / viewer-meta / 作品元数据）的整体超时。 */
+var DPD_DETECT_TIMEOUT_MS = 20000;
 var hookXorEnc = () => {
 	return new Promise((resolve, reject) => {
+		let settled = false;
+		const finish = (fn, value) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			fn(value);
+		};
+		const timer = setTimeout(() => {
+			finish(reject, new Error("等待页面数据超时：没有捕获到页面文件请求，该作品可能使用了尚未支持的加密方式"));
+		}, DPD_DETECT_TIMEOUT_MS);
 		Promise.all([
 			hookXorKey(),
 			hookEncBinUrl(),
@@ -8129,38 +8334,44 @@ var hookXorEnc = () => {
 			origConsole.log("viewerMeta ", viewerMeta);
 			origConsole.log("xor key ", encDetectorKey);
 			origConsole.log("binUrl  ", binUrl);
+			if (!binUrl) {
+				finish(reject, new Error("没有捕获到页面文件请求，无法确定下载地址"));
+				return;
+			}
 			const encBinUrls = makeEncBinUrls(binUrl, viewerMeta);
 			origConsole.log("encBinUrls  ", encBinUrls.length);
 			const saveName = makeArtworkSaveName(viewerMeta, apiV2WorkMeta);
 			origConsole.log("makeArtworkSaveName ", saveName);
-		resolve({
-			method: "xor",
-			data: {
-				zipFileName: saveName,
-				pages: encBinUrls.map((item, index) => ({
-					pageNo: index + 1,
-					// makeEncBinUrls 用的是 0 基下标（0-0001.jpg）。重命名关闭时直接暴露给用户会很怪，
-					// 这里按 1 基页号改写前缀，与 pageNo 保持一致。
-					originalName: /^\d+-/.test(item.name) ? `${index + 1}-${item.name.replace(/^\d+-/, "")}` : item.name,
-					load: (loadOptions) => fetchXorPage(item, encDetectorKey, loadOptions)
-				}))
-			}
-		});
-		});
+			finish(resolve, {
+				method: "xor",
+				data: {
+					zipFileName: saveName,
+					pages: encBinUrls.map((item, index) => ({
+						pageNo: index + 1,
+						// makeEncBinUrls 用的是 0 基下标（0-0001.jpg）。重命名关闭时直接暴露给用户会很怪，
+						// 这里按 1 基页号改写前缀，与 pageNo 保持一致。
+						originalName: /^\d+-/.test(item.name) ? `${index + 1}-${item.name.replace(/^\d+-/, "")}` : item.name,
+						load: (loadOptions) => fetchXorPage(item, encDetectorKey, loadOptions)
+					}))
+				}
+			});
+		}).catch((err) => finish(reject, err));
 	});
 };
 function makeArtworkSaveName(viewerMeta, apiV2WorkMeta) {
-	console.log(apiV2WorkMeta);
+	origConsole.log("apiV2WorkMeta ", apiV2WorkMeta);
+	const metaData = viewerMeta?.meta_data || {};
 	let creator = void 0;
-	if (viewerMeta.meta_data.creator?.length > 0) creator = viewerMeta.meta_data.creator.join(" ");
+	if (Array.isArray(metaData.creator) && metaData.creator.length > 0) creator = metaData.creator.join(" ");
+	else if (typeof metaData.creator === "string" && metaData.creator.length > 0) creator = metaData.creator;
 	let apiV2_maker = "";
 	if (apiV2WorkMeta?.maker?.name?.ja_JP) apiV2_maker = apiV2WorkMeta.maker?.name?.ja_JP;
 	let apiV2_name = "";
 	if (apiV2WorkMeta?.name?.ja_JP) apiV2_name = apiV2WorkMeta?.name?.ja_JP;
 	let publisher = "";
-	if (viewerMeta.meta_data.publisher) publisher = viewerMeta.meta_data.publisher;
+	if (metaData.publisher) publisher = metaData.publisher;
 	let title = void 0;
-	if (viewerMeta.meta_data.title) title = viewerMeta.meta_data.title;
+	if (metaData.title) title = metaData.title;
 	let no = "";
 	const NO = extractDlsiteId(window.location.href);
 	if (NO) no = NO;
@@ -8170,19 +8381,33 @@ function extractNumberOrKeepOriginal(str) {
 	const match = str.match(/\d+/);
 	return match ? match[0] : str;
 }
+/**
+ * 用「第一张被抓到的页面文件 URL」当模板，套上 viewer-meta 里的每一页 src。
+ * - DLsite Play：模板形如 …/0-0001.enc，命中编号规则时替换编号段；
+ * - comipo：模板形如 …/0e25_kyoran_2048_09_001.enc?Policy=…&Signature=…，
+ *   文件名与编号规则不匹配，此时只替换最后一段文件名，并保留后面的签名 query（所有页共用同一份签名）。
+ */
 function makeEncBinUrls(binUrlExample, viewerMeta) {
 	const binUrls = [];
-	const pattern = /\/((i-\d+)|cover|\d+)\.enc\b/;
-	const matched = pattern.test(binUrlExample);
-	viewerMeta.pages.forEach(({ src }, _i) => {
+	const example = String(binUrlExample || "");
+	const pages = Array.isArray(viewerMeta?.pages) ? viewerMeta.pages : [];
+	const numberedPattern = /\/((i-\d+)|cover|\d+)\.enc\b/;
+	const matched = numberedPattern.test(example);
+	const tail = /^([\s\S]*\/)[^/?#]*(\?[\s\S]*)?$/.exec(example);
+	pages.forEach((page, index) => {
+		const file = String(page?.src || "").replace(/^\/+/, "");
+		if (!file) return;
 		let url;
 		let name;
 		if (matched) {
-			url = binUrlExample.replace(pattern, `/${src}`);
-			name = `${_i}-${extractNumberOrKeepOriginal(src.replace(".enc", ""))}`;
+			url = example.replace(numberedPattern, `/${file}`);
+			name = `${index}-${extractNumberOrKeepOriginal(file.replace(/\.enc$/, ""))}`;
+		} else if (tail) {
+			url = `${tail[1]}${file}${tail[2] || ""}`;
+			name = file.replace(/\.enc$/, "");
 		} else {
-			url = binUrlExample.replace(/\/[^\/]+.enc/, `/${src}`);
-			name = src.replace(".enc", "");
+			url = `${file}`;
+			name = file.replace(/\.enc$/, "");
 		}
 		binUrls.push({
 			url,
@@ -8191,39 +8416,65 @@ function makeEncBinUrls(binUrlExample, viewerMeta) {
 	});
 	return binUrls;
 }
+/** 作品元数据（只用来凑文件名）的等待上限：拿不到也不能拖住整个检测流程。 */
+var DPD_META_TIMEOUT_MS = 6000;
 /**
-* hook Worker的postMessage方法，尝试截获xor key以判断是否为xor加密方式
-* @returns {Promise<encDetectorResult>}
-*/
+ * hook Worker的postMessage方法，尝试截获xor key以判断是否为xor加密方式
+ * comipo Play 走的是同一条链路：把 decryption.key 的内容当 { method: "xor", key } 传给 worker。
+ * @returns {Promise<encDetectorResult>}
+ */
 var hookXorKey = () => {
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve) => {
+		let settled = false;
 		const origPostMessage = Worker.prototype.postMessage;
+		const finish = (key) => {
+			if (settled) return;
+			settled = true;
+			Worker.prototype.postMessage = origPostMessage;
+			resolve({ key });
+		};
 		Worker.prototype.postMessage = function(msg, ...rest) {
-			if (msg && msg.param) {
-				if (msg.param.key && msg.param.method === "xor") {
-					Worker.prototype.postMessage = origPostMessage;
-					resolve({ key: msg.param.key });
-				}
-			}
+			if (msg && msg.param && msg.param.key && msg.param.method === "xor") finish(msg.param.key);
 			return origPostMessage.call(this, msg, ...rest);
 		};
 		const originalDecrypt = crypto.subtle.decrypt;
 		crypto.subtle.decrypt = async function(algorithm, key, data) {
 			const result = await originalDecrypt.call(this, algorithm, key, data);
-			resolve({ key: new TextDecoder("utf-8").decode(result) });
+			if (settled) return result;
+			try {
+				const text = new TextDecoder("utf-8").decode(result).trim();
+				// 只接受「看起来像密钥」的结果：hex 串，或较短的可见 ASCII。
+				// 否则 RSA / 口令解密的明文会被误当成 XOR 密钥。
+				if (/^[0-9a-f]{16,}$/i.test(text)) finish(text);
+				else if (/^[\x20-\x7e]{8,128}$/.test(text) && /[0-9]/.test(text)) finish(text);
+			} catch (err) {
+				origConsole.debug("[hookXorKey] decrypt 结果无法当作密钥", err);
+			}
 			return result;
 		};
 	});
 };
 var hookEncBinUrl = () => {
-	return new Promise((resolve, reject) => {
-		registerRequestHook(/\/[^/?]+\.enc(?:\?|$)/, (json, response, url) => {
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (url) => {
+			if (settled) return;
+			settled = true;
+			unhooks.forEach((unhook) => {
+				if (typeof unhook === "function") unhook();
+			});
 			resolve({ url });
-		}, true);
+		};
+		const unhooks = [
+			// DLsite Play 与 comipo Play 的页面文件都是 *.enc（comipo 后面还带一串 S3 签名 query）
+			/\/[^/?]+\.enc(?:\?|$)/,
+			// comipo 图片型作品的兜底：只看 viewer/content 目录下的图片，避免命中站内缩略图
+			/https?:\/\/[^/]*comipo\.app\/(?:viewer|content)\/[^?#]*\.(?:jpe?g|png|webp|avif)(?:\?|$)/
+		].map((pattern) => registerRequestHook(pattern, (json, response, url) => finish(url), true));
 	});
 };
 var hookViewerMeta = () => {
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve) => {
 		registerRequestHook(/\/viewer\-meta\.json\b/, (json, response, url) => {
 			resolve({ json });
 		}, true);
@@ -8232,23 +8483,28 @@ var hookViewerMeta = () => {
 var hookApiV2Work = () => {
 	return new Promise((resolve) => {
 		let unregisterFns = [];
-		const cleanUpAll = () => {
+		let settled = false;
+		const finish = (json) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
 			unregisterFns.forEach((unhook) => {
 				if (typeof unhook === "function") unhook();
 			});
 			unregisterFns.length = 0;
+			resolve({ json });
 		};
 		[
 			/\/api\/v2\/work\/.+$/,
 			/\/api\/viewer\/work\/.+$/,
-			/\/api\/comipo\/v2\/work\/.+$/
+			/\/api\/comipo\/v2\/work\/.+$/,
+			// comipo Play：作品元数据接口（试读作品未登录也会返回 200）
+			/\/api\/comipo\/viewer\/work\/.+$/,
+			/\/api\/comipo\/v3\/work\/.+$/
 		].forEach((pattern) => {
-			const unhook = registerRequestHook(pattern, (json) => {
-				cleanUpAll();
-				resolve({ json });
-			}, true);
-			unregisterFns.push(unhook);
+			unregisterFns.push(registerRequestHook(pattern, (json) => finish(json), true));
 		});
+		const timer = setTimeout(() => finish(null), DPD_META_TIMEOUT_MS);
 	});
 };
 /**
@@ -8286,14 +8542,61 @@ function normalizeDetectedExt(ext) {
 	const lower = String(ext).toLowerCase();
 	return lower === "jpeg" ? "jpg" : lower;
 }
+/** 判断一段字节是否其实是一串 ASCII hex 文本（comipo 的 decryption.key 就是这种内容）。 */
+function looksLikeHexText(bytes) {
+	if (bytes.length < 16 || bytes.length % 2 !== 0) return false;
+	for (let i = 0; i < bytes.length; i++) {
+		const value = bytes[i];
+		const isDigit = value >= 48 && value <= 57;
+		const isLower = value >= 97 && value <= 102;
+		const isUpper = value >= 65 && value <= 70;
+		if (!isDigit && !isLower && !isUpper) return false;
+	}
+	return true;
+}
+function hexTextToBytes(text) {
+	const matched = text.match(/.{1,2}/g);
+	return matched ? Uint8Array.from(matched.map((part) => parseInt(part, 16))) : null;
+}
+/**
+ * 把各种形态的 XOR 密钥统一成字节数组。
+ * 支持 hex 文本（原版 DLsite Play 的约定）、普通文本、Uint8Array / ArrayBuffer / 数字数组，
+ * 以及「内容是 ASCII hex 文本的字节数组」（comipo 的 decryption.key）。
+ * @returns {Uint8Array|null}
+ */
+function xorKeyToBytes(key) {
+	if (key === null || key === void 0 || key === "") return null;
+	if (typeof key === "string") {
+		const text = key.trim();
+		if (text.length >= 2 && text.length % 2 === 0 && /^[0-9a-f]+$/i.test(text)) return hexTextToBytes(text);
+		return new TextEncoder().encode(text);
+	}
+	if (key instanceof Uint8Array) return looksLikeHexText(key) ? hexTextToBytes(new TextDecoder("utf-8").decode(key)) : key;
+	if (key instanceof ArrayBuffer) {
+		const bytes = new Uint8Array(key);
+		return looksLikeHexText(bytes) ? hexTextToBytes(new TextDecoder("utf-8").decode(bytes)) : bytes;
+	}
+	if (Array.isArray(key)) return xorKeyToBytes(Uint8Array.from(key.map(Number)));
+	if (typeof key === "object" && key.buffer instanceof ArrayBuffer) return xorKeyToBytes(new Uint8Array(key.buffer, key.byteOffset || 0, key.byteLength));
+	origConsole.warn("[xor] 无法识别的密钥类型，按未加密处理", key);
+	return null;
+}
+function xorWithKeyBytes(data, keyBytes) {
+	const result = new Uint8Array(data.length);
+	for (let i = 0; i < data.length; i++) result[i] = data[i] ^ keyBytes[i % keyBytes.length];
+	return result;
+}
 /**
  * 下载单个 XOR 加密页并解密，返回 { blob, ext, mime }。
  * options.format 为目标格式（"jpg" 默认 / "png"）：原文件已是目标格式时直接复用原始字节，
  * 不做任何重编码；否则用 canvas 转码为 jpg 或 png。
+ * 没有密钥时按明文处理（comipo 的部分内容不加密）。
  */
-async function fetchXorPage({ url }, keyHex, options = {}) {
-	const arrayBuffer = await downloadArrayBuffer(url);
-	const decrypted = xorDecrypt(new Uint8Array(arrayBuffer), keyHex);
+async function fetchXorPage(item, keyHex, options = {}) {
+	const arrayBuffer = await downloadArrayBuffer(item.url);
+	const raw = new Uint8Array(arrayBuffer);
+	const keyBytes = xorKeyToBytes(item.key ?? keyHex);
+	const decrypted = keyBytes && keyBytes.length > 0 ? xorWithKeyBytes(raw, keyBytes) : raw;
 	const type = await fileTypeFromBuffer(decrypted);
 	const mime = (type && type.mime) || "application/octet-stream";
 	const ext = normalizeDetectedExt(type && type.ext);
@@ -8383,6 +8686,9 @@ var DPD_CSS = `
 .dpd-panel.is-collapsed .dpd-body{display:none}
 .dpd-panel.is-collapsed .dpd-head-text,.dpd-panel.is-collapsed .dpd-head-actions{opacity:0;pointer-events:none}
 @media (prefers-color-scheme:dark){.dpd-panel{--md-primary:#D0BCFF;--md-on-primary:#381E72;--md-primary-container:#4F378B;--md-on-primary-container:#EADDFF;--md-secondary-container:#4A4458;--md-on-secondary-container:#E8DEF8;--md-tertiary-container:#633B48;--md-on-tertiary-container:#FFD8E4;--md-surface-container-low:#1D1B20;--md-surface-container:#211F26;--md-surface-container-high:#2B2930;--md-surface-container-highest:#36343B;--md-on-surface:#E6E0E9;--md-on-surface-variant:#CAC4D0;--md-outline:#938F99;--md-outline-variant:#49454F;--md-error:#F2B8B5;--md-on-error:#601410;--md-error-container:#8C1D18;--md-on-error-container:#F9DEDC;--md-ok:#7DD58F;--md-warn:#F0C24B;--md-hover:rgba(230,224,233,.08)}}
+/* comipo Play 是绿色换皮站，检测到后整块面板换成绿色主色（品牌色 #43c453 对应的 M3 绿色系）。 */
+.dpd-panel.is-comipo{--md-primary:#1B6C2D;--md-on-primary:#fff;--md-primary-container:#A5F4A9;--md-on-primary-container:#002105;--md-tertiary-container:#C3F0C7;--md-on-tertiary-container:#00210A}
+@media (prefers-color-scheme:dark){.dpd-panel.is-comipo{--md-primary:#8AD68F;--md-on-primary:#003912;--md-primary-container:#00531C;--md-on-primary-container:#A5F4A9;--md-tertiary-container:#2C5C33;--md-on-tertiary-container:#C6F3C9}}
 .dpd-head{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;-webkit-user-select:none;user-select:none;border-bottom:1px solid var(--md-outline-variant);transition:background .15s}
 .dpd-head:hover{background:var(--md-hover)}
 .dpd-panel.is-collapsed .dpd-head{border-bottom:0}
@@ -8494,6 +8800,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			attaching: false,
 			detected: false,
 			method: "",
+			platform: "dlsite",
 			zipFileName: "",
 			error: "",
 			mode: "image",
@@ -8571,12 +8878,48 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			const range = normalizedRange();
 			return range.to - range.from + 1;
 		}
+		/**
+		 * 取第一个「真的拿到作品数据」的检测结果。
+		 * 单个检测器可能因为当前作品/接口不存在而解析出空结果，不能让它把整体拖住，
+		 * 只有全部检测器都失败（或返回空）时才报错。
+		 */
+		function waitForUsableDetector(detectors) {
+			return new Promise((resolve, reject) => {
+				const list = detectors.filter(Boolean);
+				if (list.length === 0) {
+					reject(new Error("没有可用的检测方式"));
+					return;
+				}
+				let pending = list.length;
+				let lastError = null;
+				let done = false;
+				list.forEach((item) => {
+					Promise.resolve(item).then((value) => {
+						if (done) return;
+						if (value && value.data) {
+							done = true;
+							resolve(value);
+							return;
+						}
+						pending -= 1;
+						if (pending === 0) reject(lastError || new Error("没能识别该作品的加密方式"));
+					}).catch((err) => {
+						lastError = err;
+						pending -= 1;
+						if (!done && pending === 0) reject(lastError);
+					});
+				});
+			});
+		}
 		function attachEncMethod() {
 			if (state.attaching || state.detected) return;
 			const version = stateVersion;
 			state.attaching = true;
 			addLog("正在检测加密方式…");
-			Promise.race([hookXorEnc(), hookFetchPuzzle()]).then((result) => {
+			const workNo = extractDlsiteId(window.location.href);
+			// comipo Play：优先自己解析内容接口（不依赖页面请求的时机），失败再等页面自身的请求。
+			const detectors = state.platform === "comipo" ? [resolveComipoPages(workNo), hookXorEnc()] : [hookXorEnc(), hookFetchPuzzle()];
+			waitForUsableDetector(detectors).then((result) => {
 				if (version !== stateVersion) return;
 				const data = result.data || {};
 				job = data;
@@ -8795,12 +9138,12 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		function headerSubtitle() {
 			if (state.error) return "出错，详见日志";
 			if (state.attaching) return "正在检测加密方式…";
-			if (!state.detected) return "等待作品页";
+			if (!state.detected) return state.platform === "comipo" ? "comipo · 等待作品页" : "等待作品页";
 			const done = state.success + state.failed + state.skipped;
 			if (state.running) return `下载中 ${done}/${state.total}${state.zipping ? " · 打包中" : ""}${state.cancelled ? " · 正在取消" : ""}`;
 			if (state.cancelled) return `已取消：成功 ${state.success} / 失败 ${state.failed}${state.skipped ? ` / 跳过 ${state.skipped}` : ""}`;
 			if (state.finished) return `完成：成功 ${state.success} / 失败 ${state.failed}`;
-			return `${state.method === "xor" ? "XOR 解密" : "拼图还原"} · 共 ${state.pageCount} 页`;
+			return `${state.platform === "comipo" ? "comipo · " : ""}${state.method === "xor" ? "XOR 解密" : "拼图还原"} · 共 ${state.pageCount} 页`;
 		}
 		function visibleEntries() {
 			const list = state.onlyFailed ? state.entries.filter((entry) => entry.status === "error") : state.entries;
@@ -9024,6 +9367,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		}
 		function pathnameUpdated() {
 			pastLocationKey = window.location.href;
+			state.platform = detectPlayPlatform(window.location.href);
 			resetState();
 			if (extractDlsiteId(window.location.href)) attachEncMethod();
 		}
@@ -9053,7 +9397,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 				// 作品信息在子帧里检测到了，顶层让位，避免空面板遮挡。
 				return null;
 			}
-			return h("div", { class: ["dpd-panel", state.collapsed ? "is-collapsed" : ""] }, [
+			return h("div", { class: ["dpd-panel", state.collapsed ? "is-collapsed" : "", state.platform === "comipo" ? "is-comipo" : ""] }, [
 			h("div", {
 				class: "dpd-head",
 				title: state.collapsed ? "点击展开" : "点击收起",
@@ -9067,13 +9411,13 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 					h("div", { class: "dpd-sub" }, headerSubtitle())
 				]),
 				h("div", { class: "dpd-head-actions" }, [
-					state.detected ? h("span", { class: ["dpd-chip", state.method === "xor" ? "is-xor" : ""] }, state.method === "xor" ? "XOR" : "拼图") : null,
+					state.detected || state.platform === "comipo" ? h("span", { class: ["dpd-chip", state.method === "xor" ? "is-xor" : ""] }, state.platform === "comipo" ? "comipo" : state.detected ? state.method === "xor" ? "XOR" : "拼图" : "检测中") : null,
 					h("button", { class: "dpd-ghost", title: state.collapsed ? "展开" : "收起" }, state.collapsed ? "‹" : "›")
 				])
 			]),
 			h("div", { class: "dpd-body" }, [
 				state.error ? h("div", { class: "dpd-alert" }, state.error) : null,
-				!state.detected ? h("div", { class: "dpd-hint" }, state.attaching ? "正在检测该作品的加密方式…" : "打开 DLsite Play 作品阅读页后自动检测") : null,
+				!state.detected ? h("div", { class: "dpd-hint" }, state.attaching ? "正在检测该作品的加密方式…" : state.platform === "comipo" ? "打开 comipo Play 作品阅读页后自动检测" : "打开 DLsite Play 作品阅读页后自动检测") : null,
 				state.detected ? sectionRange() : null,
 				state.detected ? sectionMode() : null,
 				state.detected ? sectionNaming() : null,

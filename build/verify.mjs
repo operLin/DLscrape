@@ -24,11 +24,15 @@ const check = (name, fn) => {
 
 console.log("[1] 拼接完整性");
 for (const [name, file] of [
+	["00-work-id", "00-work-id.js"],
 	["01-puzzle-resolve", "01-puzzle-resolve.js"],
 	["02-engine", "02-engine.js"],
-	["03-xor-resolve", "03-xor-resolve.js"],
 	["04-xor-fetch", "04-xor-fetch.js"],
-	["05-app", "05-app.js"]
+	["05-app", "05-app.js"],
+	["06-content-api", "06-content-api.js"],
+	["07-xor-enc", "07-xor-enc.js"],
+	["08-enc-bin-urls", "08-enc-bin-urls.js"],
+	["09-xor-hooks", "09-xor-hooks.js"]
 ]) {
 	const part = readFileSync(path.join(buildDir, "parts", file), "utf8").replace(/\r\n/g, "\n").replace(/\n$/, "");
 	check(`part ${name} 逐字出现在产物中`, () => {
@@ -54,6 +58,44 @@ check("新内核函数均已导出到产物", () => {
 check("旧的一次性 API 已替换为页列表", () => {
 	assert.ok(out.includes("pages: files.map("), "拼图页列表缺失");
 	assert.ok(out.includes("pages: encBinUrls.map("), "XOR 页列表缺失");
+});
+check("comipo Play 已有独立解析链路", () => {
+	for (const token of [
+		"function detectPlayPlatform(",
+		"COMIPO_CONTENT_ORIGIN",
+		"/viewer\\/(?:free|sample)\\/([A-Z\\d]+)/",
+		"async function resolveComipoPages(",
+		"/api/comipo/sample/viewer/token/",
+		"/api/comipo/free/viewer/token/",
+		"loadComipoViewerMeta",
+		"makeComipoSaveName"
+	]) {
+		assert.ok(out.includes(token), `缺少：${token}`);
+	}
+});
+check("comipo 检测不再依赖单一路由/单一接口", () => {
+	assert.ok(out.includes("function waitForUsableDetector("), "缺少非空结果竞速器");
+	assert.ok(appCode.includes('state.platform === "comipo" ? [resolveComipoPages(workNo), hookXorEnc()]'), "comipo 未走主动解析 + XOR 被动检测");
+	assert.ok(appCode.includes('state.platform = detectPlayPlatform(window.location.href)'), "未在路由变化时记录平台");
+	assert.ok(appCode.includes("if (extractDlsiteId(window.location.href)) attachEncMethod();"), "路由门禁异常");
+});
+check("XOR 链路对 comipo 的兼容改造已就位", () => {
+	for (const token of [
+		"DPD_DETECT_TIMEOUT_MS",
+		"DPD_META_TIMEOUT_MS",
+		"/\\/api\\/comipo\\/viewer\\/work\\/.+$/",
+		"function looksLikeHexText(",
+		"function xorKeyToBytes(",
+		"const tail = /^([\\s\\S]*\\/)[^/?#]*(\\?[\\s\\S]*)?$/"
+	]) {
+		assert.ok(out.includes(token), `缺少：${token}`);
+	}
+	assert.ok(out.includes("item.key ?? keyHex"), "单页密钥未支持逐页密钥");
+});
+check("comipo 面板使用绿色 M3 主题", () => {
+	for (const token of [".dpd-panel.is-comipo{--md-primary:#1B6C2D", ".dpd-panel.is-comipo{--md-primary:#8AD68F", 'state.platform === "comipo" ? "is-comipo" : ""', 'state.platform === "comipo" ? "comipo" : state.detected ? state.method === "xor" ? "XOR" : "拼图" : "检测中"', "打开 comipo Play 作品阅读页后自动检测"]) {
+		assert.ok(appCode.includes(token), `绿色主题缺少：${token}`);
+	}
 });
 check("UI 关键控件已渲染", () => {
 	for (const token of ["页码范围", 'optionSwitch("mode", "image", "逐页"', 'optionSwitch("mode", "zip", "压缩"', "按页号重命名", "任务进度", "dpd-switch", "dpd-bar-fill", 'h("div", { class: "dpd-title" }, "DLscrape")']) {
@@ -457,6 +499,64 @@ await (async () => {
 	});
 })();
 
+await (async () => {
+	// comipo 的 decryption.key 是 64 个 ASCII hex 字符，密钥既可能是这段文本、也可能是它的字节，
+	// 两种形态都必须解出同一串 32 字节密钥；再用真实布局验证「嗅探 + 按目标格式转码」。
+	const xorCode = readFileSync(path.join(buildDir, "parts", "04-xor-fetch.js"), "utf8").replace(/\r\n/g, "\n").replace(/\n$/, "");
+	const requested = [];
+	let payload = new Uint8Array([0]);
+	const xorFactory = new Function(
+		"Blob",
+		"origConsole",
+		"fileTypeFromBuffer",
+		"resolveImageFormat",
+		"imageBlobToFormat",
+		"downloadArrayBuffer",
+		`${xorCode}
+		return { fetchXorPage, xorKeyToBytes, xorWithKeyBytes, looksLikeHexText };`
+	);
+	const xorApi = xorFactory(
+		Blob,
+		fakeConsole,
+		async (bytes) => (bytes[0] === 0x52 && bytes[1] === 0x49 ? { ext: "webp", mime: "image/webp" } : { ext: "bin", mime: "application/octet-stream" }),
+		(options = {}) => (options.format === "png" ? "png" : "jpg"),
+		async () => new Blob([new Uint8Array([0xff, 0xd8, 0xff])]),
+		async (url) => {
+			requested.push(url);
+			return payload.buffer;
+		}
+	);
+	const keyText = "b83cbc45512c27e80ea3cfffdb9a03b3a693eb4139cd5b9b5e2a52a798d64e60";
+	const keyFromText = xorApi.xorKeyToBytes(keyText);
+	const keyFromAsciiBytes = xorApi.xorKeyToBytes(new TextEncoder().encode(keyText));
+	check("comipo 的 hex 密钥文本与 ASCII 字节两种形态解出同一密钥", () => {
+		assert.ok(xorApi.looksLikeHexText(new TextEncoder().encode(keyText)), "未识别 ASCII hex 字节");
+		assert.equal(keyFromText.length, 32, `密钥长度应为 32，实际 ${keyFromText.length}`);
+		assert.equal(keyFromText[0], 0xb8);
+		assert.deepEqual(Array.from(keyFromAsciiBytes), Array.from(keyFromText), "ASCII 字节形态未按 hex 解码");
+	});
+	check("XOR 加解密可逆", () => {
+		const data = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3]);
+		const once = xorApi.xorWithKeyBytes(data, keyFromText);
+		assert.notDeepEqual(Array.from(once), Array.from(data), "密文不应与明文相同");
+		assert.deepEqual(Array.from(xorApi.xorWithKeyBytes(once, keyFromText)), Array.from(data));
+	});
+	// 按 comipo 的布局造一页：明文是 RIFF/WEBP，密钥来自 decryption.key 文本。
+	payload = xorApi.xorWithKeyBytes(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x6e, 0x88, 0x03, 0x00, 0x57, 0x45, 0x42, 0x50]), keyFromText);
+	const converted = await xorApi.fetchXorPage({ url: "https://dl.comipo.app/viewer/ebook_fixed/v2/sample/books/BJ03046000/BJ03045050/p1.enc?Policy=x", key: keyText }, "deadbeef", { format: "jpg" });
+	check("comipo 单页解密后嗅探为图片并按目标格式转码", () => {
+		assert.equal(requested.length, 1, "应请求一次页面文件");
+		assert.equal(converted.ext, "jpg", `扩展名应为 jpg，实际 ${converted.ext}`);
+		assert.equal(converted.converted, true, "应发生转码");
+	});
+	payload = new Uint8Array([9, 9, 9, 9]);
+	const passthrough = await xorApi.fetchXorPage({ url: "plain" }, null, { format: "jpg" });
+	check("没有密钥时按明文透传（不做无意义的转码）", () => {
+		assert.equal(passthrough.ext, "bin", `扩展名应为 bin，实际 ${passthrough.ext}`);
+		assert.notEqual(passthrough.converted, true);
+	});
+})();
+
 console.log("[4] UI 逻辑（无 Vue 的渲染树桩测试）");
 
 const walk = (node, visit) => {
@@ -498,6 +598,7 @@ const findByClass = (node, className) => {
 /** 共享的 App_default 工厂：同时暴露挂载与去重函数，供 UI 交互 / 单例挂载测试使用。 */
 const appFactoryOf = new Function(
 	"_plugin_vue_export_helper_default", "_css", "reactive", "h", "createApp", "extractDlsiteId",
+	"detectPlayPlatform", "resolveComipoPages",
 	"hookXorEnc", "hookFetchPuzzle", "padPageNumber", "_unsafeWindow", "window", "history", "document",
 	"requestAnimationFrame", "origConsole", "executeDownloadJob",
 	`${appCode}
@@ -547,6 +648,8 @@ const appFactoryOf = new Function(
 		"h",
 		"createApp",
 		"extractDlsiteId",
+		"detectPlayPlatform",
+		"resolveComipoPages",
 		"hookXorEnc",
 		"hookFetchPuzzle",
 		"padPageNumber",
@@ -567,6 +670,8 @@ const appFactoryOf = new Function(
 		(tag, props, children) => ({ tag, props: props || {}, children }),
 		() => ({ mount() {} }),
 		() => "BJ123456",
+		() => "dlsite",
+		async () => null,
 		() => new Promise(() => {}),
 		() => Promise.resolve({ method: "puzzle", data: { zipFileName: "wk", pages } }),
 		(value, width) => String(value).padStart(width, "0"),
@@ -617,6 +722,8 @@ const appFactoryOf = new Function(
 		"h",
 		"createApp",
 		"extractDlsiteId",
+		"detectPlayPlatform",
+		"resolveComipoPages",
 		"hookXorEnc",
 		"hookFetchPuzzle",
 		"padPageNumber",
@@ -637,6 +744,8 @@ const appFactoryOf = new Function(
 		(tag, props, children) => ({ tag, props: props || {}, children }),
 		() => ({ mount() {} }),
 		() => null,
+		() => "dlsite",
+		async () => null,
 		() => new Promise(() => {}),
 		() => new Promise(() => {}),
 		(value, width) => String(value).padStart(width, "0"),
@@ -683,6 +792,8 @@ const appFactoryOf = new Function(
 		(tag, props, children) => ({ tag, props: props || {}, children }),
 		() => ({ mount() {} }),
 		() => "BJ123456",
+		() => "dlsite",
+		async () => null,
 		() => new Promise(() => {}),
 		() => Promise.resolve({ method: "puzzle", data: { zipFileName: "wk", pages } }),
 		(value, width) => String(value).padStart(width, "0"),
@@ -751,6 +862,70 @@ const appFactoryOf = new Function(
 	});
 }
 
+{
+	const pages = Array.from({ length: 4 }, (_, index) => ({
+		pageNo: index + 1,
+		originalName: `0e25_kyoran_2048_09_00${index + 1}.enc`,
+		load: async () => ({ blob: new Blob([new Uint8Array([index])]), ext: "jpg" })
+	}));
+	const makeComipoApp = (resolveComipo, xorStub) => appFactoryOf(
+		(sfc) => sfc,
+		() => {},
+		(object) => object,
+		(tag, props, children) => ({ tag, props: props || {}, children }),
+		() => ({ mount() {} }),
+		() => "BJ03045050",
+		() => "comipo",
+		resolveComipo,
+		xorStub,
+		() => { throw new Error("comipo 不应启动 DLsite 拼图检测"); },
+		(value, width) => String(value).padStart(width, "0"),
+		{},
+		{ location: { href: "https://play.comipo.app/viewer/sample/BJ03045050" }, addEventListener() {}, dispatchEvent() {} },
+		{ pushState() {}, replaceState() {} },
+		{ body: { appendChild() {} }, createElement: () => ({ style: {}, click() {}, remove() {} }) },
+		() => {},
+		fakeConsole,
+		async () => ({ save: null })
+	);
+	const { App_default } = makeComipoApp(
+		async () => ({ method: "xor", data: { zipFileName: "[BJ03045050] (テスト) 作品", key: "b83cbc45512c27e80ea3cfffdb9a03b3a693eb4139cd5b9b5e2a52a798d64e60", pages } }),
+		() => new Promise(() => {})
+	);
+	const render = App_default.setup({});
+	const before = render();
+	check("comipo 作品页在检测阶段就带绿色主题", () => {
+		assert.ok(findByClass(before, "is-comipo"), "面板未加 is-comipo 类");
+		const text = textOf(before);
+		assert.ok(text.includes("正在检测该作品的加密方式…"), text);
+		assert.ok(text.includes("comipo"), `面板未体现 comipo 平台：${text}`);
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	const detected = render();
+	check("comipo 检测完成后显示 comipo 标识与页数", () => {
+		const text = textOf(detected);
+		assert.ok(text.includes("comipo"), text);
+		assert.ok(text.includes("共 4 页"), text);
+	});
+	check("comipo 面板保留 DLsite 那套下载设置区", () => {
+		const text = textOf(detected);
+		for (const label of ["页码范围", "输出方式", "逐页", "压缩", "JPG", "PNG", "文件命名", "并发数", "开始下载"]) {
+			assert.ok(text.includes(label), `缺少：${label}`);
+		}
+	});
+	// 兜底链路：主动解析返回 null（例如接口变了）时，仍要让「等页面自身请求」的 XOR 检测接管。
+	const { App_default: FallbackApp } = makeComipoApp(async () => null, () => Promise.resolve({ method: "xor", data: { zipFileName: "fallback", key: "", pages } }));
+	const fallbackRender = FallbackApp.setup({});
+	fallbackRender();
+	await new Promise((resolve) => setImmediate(resolve));
+	const fallbackDetected = fallbackRender();
+	check("comipo 主动解析失败时回退到被动 XOR 检测", () => {
+		const text = textOf(fallbackDetected);
+		assert.ok(text.includes("共 4 页"), `兜底检测未完成：${text}`);
+		assert.ok(text.includes("comipo"), text);
+	});
+}
+
 console.log("[5] 重复注入去重与单例挂载");
 
 {
@@ -791,6 +966,8 @@ console.log("[5] 重复注入去重与单例挂载");
 		(tag, props, children) => ({ tag, props: props || {}, children }),
 		() => ({ mount(element) { mounted.push(element); } }),
 		() => "BJ123456",
+		() => "dlsite",
+		async () => null,
 		() => new Promise(() => {}),
 		() => new Promise(() => {}),
 		(value, width) => String(value).padStart(width, "0"),
@@ -825,7 +1002,7 @@ check("油猴头已换成 fork 版元数据", () => {
 		"// ==UserScript==",
 		"// @name         DLscrape",
 		"// @namespace    https://github.com/operLin/DLscrape",
-		"// @version      2.3.0",
+		"// @version      2.4.0",
 		"// @author       cpufan,",
 		"// @license      MIT",
 		"// @match        https://play.dlsite.com/*",

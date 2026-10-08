@@ -16,14 +16,15 @@
 | 3 | **输出方式 + 输出格式** | 两组独立滑块：`逐页 / 压缩`，以及 `JPG / PNG`。图片模式优先调用 `showDirectoryPicker()` 直接写入文件夹，避免几百次浏览器下载提示 |
 | 4 | **三种文件命名** | `页号 / 顺序 / 原始` 三档滑块 + 位数选择（2–5，默认 3）。页号用原始页号（只下 10–20 页就是 `010.jpg`–`020.jpg`），顺序按本次下载顺序从 `001` 重排，原始保留 DLsite 原名 |
 | 5 | **任务进度面板** | 进度条 + 成功/失败计数 + 逐页状态（等待/下载中/成功/失败原因）+ 可筛选的明细列表 + 带时间戳日志，支持取消 |
-| 6 | **重复注入去重** | 同一文档被安装两次（或与旧版并存）时只保留一个面板，并清掉别人的面板宿主；顶层与 iframe 之间通过 `top.__dpdHostState` 让真正检测到加密方式的那一帧显示界面 |
+| 6 | **comipo Play 支持** | 同一套脚本也能在 comipo 的换皮阅读器（`play.comipo.app`）里工作：主动解析内容接口与 `viewer-meta.json`，检测到 comipo 时整个面板切换为**绿色 M3 主题**并显示 `comipo` 徽章 |
+| 7 | **重复注入去重** | 同一文档被安装两次（或与旧版并存）时只保留一个面板，并清掉别人的面板宿主；顶层与 iframe 之间通过 `top.__dpdHostState` 让真正检测到加密方式的那一帧显示界面 |
 
 ## 安装
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 或 Violentmonkey。
 2. 打开 [`DLscrape.user.js`](DLscrape.user.js) 的 raw 链接安装：
    `https://github.com/operLin/DLscrape/raw/main/DLscrape.user.js`
-3. 打开 DLsite Play 作品阅读页，右侧面板会自动检测加密方式（XOR / 拼图）并列出页数。
+3. 打开 DLsite Play 或 comipo Play 的作品阅读页，右侧面板会自动检测加密方式（XOR / 拼图）并列出页数。
 
 > 如果你同时装着上游原版，**建议先禁用原版**：两者会各自注入一个面板（本 fork 会清理对方的面板，但同名脚本装两份本身就容易混淆）。
 
@@ -35,9 +36,9 @@
 ```powershell
 node build/apply.mjs                              # 生成/刷新 DLscrape.user.js
 node --check .\DLscrape.user.js                   # 产物语法校验
-node build/verify.mjs                             # 拼接完整性 + 内核行为 + UI 渲染 + 头部元数据（52 项）
+node build/verify.mjs                             # 拼接完整性 + 内核行为 + UI 渲染 + 头部元数据（68 项）
 cd build; npm i; cd ..                            # 一次性安装测试依赖（vue 3.5.42 + jsdom）
-node build/dom-test.mjs                           # 真实 Vue + jsdom 集成测试（26 项）
+node build/dom-test.mjs                           # 真实 Vue + jsdom 集成测试（32 项）
 ```
 
 `apply.mjs` 在替换前会对每个区间的**起始行做内容断言**，行号漂移时直接报错而不是静默改错位置；它同时负责把输出文件的油猴头改写成 fork 版元数据（`@author` / `@version` / `@namespace` / 自更新地址），**`dlsite.txt` 始终字节不变**。
@@ -50,11 +51,15 @@ DLscrape.user.js                   构建产物：可安装的改进版 userscri
 build/
   apply.mjs                        拼接脚本（含 fork 元数据配置块）
   parts/
+    00-work-id.js                  平台识别 + 作品号提取（DLsite / comipo）
     01-puzzle-resolve.js           拼图链路：页列表 hook
     02-engine.js                   下载内核：命名 / 格式 / 打包 / 进度 / 并发
-    03-xor-resolve.js              XOR 链路：页列表 hook
-    04-xor-fetch.js                XOR 单页抓取与转码
-    05-app.js                      UI：手写 h() 渲染 + Material 3 主题
+    04-xor-fetch.js                XOR 单页抓取与转码（hex 文本密钥兼容）
+    05-app.js                      UI：手写 h() 渲染 + Material 3 主题（含 comipo 绿色主题）
+    06-content-api.js              平台感知的凭据 / ziptree / 元信息 + comipo 主动解析
+    07-xor-enc.js                  XOR 链路：页列表 hook + 检测超时
+    08-enc-bin-urls.js             页面 URL 推导（保留签名 query）
+    09-xor-hooks.js                密钥 / 页面 / 元信息请求钩子
   verify.mjs                       静态 + 内核行为验证
   dom-test.mjs                     真实 Vue + jsdom 集成测试
   README.md                        构建细节（拼接点、关键约定）
@@ -68,6 +73,9 @@ build/
   旧参数 `rename: false` 与 `asJpeg: false` 仍兼容映射。
 - 取消后剩余页面不做网络请求、直接记为 `skipped`，因此 `成功 + 失败 + 跳过 === 总数` 恒成立。
   压缩包模式中途取消时按钮变为「保存不完整压缩包」，避免把残缺压缩包当完整结果。
+- comipo 支持：检测到 `play.comipo.app` 时用 `resolveComipoPages()` 主动解析（viewer token →
+  `viewer-meta.json` → `decryption.key` hex 密钥 → 逐页 `.enc` XOR 解密 → 文件头嗅探后按 JPG/PNG 输出），
+  失败则回退到被动 hook 检测；面板套用绿色主题。DLsite 页面上的行为完全不变。
 - 更多实现细节见 [build/README.md](build/README.md)。
 
 ## 免责声明
