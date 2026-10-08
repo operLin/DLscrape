@@ -1,0 +1,15 @@
+{
+	"name": "dlscrape-build",
+	"version": "2.3.0",
+	"private": true,
+	"description": "构建/测试脚本：把 build/parts/*.js 按行区间拼回 dlsite.txt，生成改进版 userscript",
+	"scripts": {
+		"build": "node apply.mjs",
+		"verify": "node verify.mjs",
+		"test": "node verify.mjs && node dom-test.mjs"
+	},
+	"devDependencies": {
+		"jsdom": "^30.1.2",
+		"vue": "3.5.42"
+	}
+}

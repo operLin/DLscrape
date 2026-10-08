@@ -1,0 +1,4 @@
+# 保持文件字节稳定：禁止任何换行/EOL 转换。
+# DLsite-Play-Downloader.user.js 必须是 LF（build/verify.mjs 会校验 EOL），
+# dlsite.txt 必须与上游产物字节一致（行号锚点依赖它，verify 会校验大小与切分结果）。
+* -text

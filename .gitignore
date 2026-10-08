@@ -1,0 +1,9 @@
+# 测试依赖（按 build/README.md 用 npm i 安装，不入库）
+build/node_modules/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
