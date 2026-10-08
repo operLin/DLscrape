@@ -2,7 +2,7 @@
 	"name": "dlscrape-build",
 	"version": "2.3.0",
 	"private": true,
-	"description": "构建/测试脚本：把 build/parts/*.js 按行区间拼回 dlsite.txt，生成改进版 userscript",
+	"description": "构建/测试脚本：把 build/parts/*.js 按行区间拼回 upstream/dlsite-play-downloader-v2.2.1.user.js，生成改进版 userscript",
 	"scripts": {
 		"build": "node apply.mjs",
 		"verify": "node verify.mjs",

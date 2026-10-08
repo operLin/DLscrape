@@ -1,6 +1,6 @@
 # DLscrape — 改进版构建说明
 
-`dlsite.txt` 是**编译产物**（Vite + vite-plugin-monkey → SystemJS register 格式），不是手写源码。
+`upstream/dlsite-play-downloader-v2.2.1.user.js` 是**上游编译产物**（Vite + vite-plugin-monkey → SystemJS register 格式），不是手写源码。
 本目录把「改动代码」保存为独立片段，用 `apply.mjs` 按行区间拼接回原始 bundle，从而得到可复现、
 可 review 的改进版 userscript。
 
@@ -9,7 +9,7 @@
 | 文件 | 说明 |
 |---|---|
 | `../DLscrape.user.js` | 改进版 userscript，可直接拖进 Tampermonkey / Violentmonkey 安装 |
-| `../dlsite.txt` | 原始 v2.2.1 产物，**保持未修改** |
+| `../upstream/dlsite-play-downloader-v2.2.1.user.js` | 上游 v2.2.1 编译产物，**只读输入、保持字节未修改**（行号锚点依赖它） |
 
 ## 构建与验证
 
@@ -26,9 +26,9 @@ node build/dom-test.mjs       # 32 项
 `apply.mjs` 会在替换前对每个区间的**起始行做内容断言**，行号漂移时直接报错而不是静默改错地方。
 它同时把输出文件的油猴头改写成 fork 版元数据（文件顶部的 `FORK` 配置块）：`@name` / `@version` /
 `@namespace` / `@supportURL` / `@downloadURL` / `@updateURL`。**这一改写是逐行等长替换**，
-因此不会移动任何行号锚点；`dlsite.txt` 始终保持字节不变。
+因此不会移动任何行号锚点；上游产物始终保持字节不变。
 
-## 拼接点（行号基于原始 `dlsite.txt`）
+## 拼接点（行号基于 `upstream/dlsite-play-downloader-v2.2.1.user.js`）
 
 | 行区间 | 内容 | 片段 |
 |---|---|---|

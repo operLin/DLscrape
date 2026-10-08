@@ -41,13 +41,14 @@ cd build; npm i; cd ..                            # 一次性安装测试依赖�
 node build/dom-test.mjs                           # 真实 Vue + jsdom 集成测试（32 项）
 ```
 
-`apply.mjs` 在替换前会对每个区间的**起始行做内容断言**，行号漂移时直接报错而不是静默改错位置；它同时负责把输出文件的油猴头改写成 fork 版元数据（`@author` / `@version` / `@namespace` / 自更新地址），**`dlsite.txt` 始终字节不变**。
+`apply.mjs` 在替换前会对每个区间的**起始行做内容断言**，行号漂移时直接报错而不是静默改错位置；它同时负责把输出文件的油猴头改写成 fork 版元数据（`@author` / `@version` / `@namespace` / 自更新地址），**上游产物 `upstream/dlsite-play-downloader-v2.2.1.user.js` 始终字节不变**。
 
 ## 目录结构
 
 ```
-dlsite.txt                         上游 v2.2.1 编译产物（只读输入，未修改）
 DLscrape.user.js                   构建产物：可安装的改进版 userscript
+upstream/
+  dlsite-play-downloader-v2.2.1.user.js  上游 v2.2.1 编译产物（只读构建输入，字节未修改）
 build/
   apply.mjs                        拼接脚本（含 fork 元数据配置块）
   parts/

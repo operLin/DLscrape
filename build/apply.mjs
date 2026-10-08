@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const buildDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(buildDir, "..");
-const sourcePath = path.join(root, "dlsite.txt");
+const sourcePath = path.join(root, "upstream", "dlsite-play-downloader-v2.2.1.user.js");
 // 产物文件名同时用于油猴头的自更新地址
 const assetName = "DLscrape.user.js";
 const outputPath = path.join(root, assetName);
@@ -16,7 +16,7 @@ const part = (name) => {
 	return text.replace(/\n$/, "");
 };
 
-// 行号基于原始 dlsite.txt（1 起，含端点）。
+// 行号基于上游产物 upstream/dlsite-play-downloader-v2.2.1.user.js（1 起，含端点）。
 const replacements = [
 	{ name: "work-id", start: 3013, end: 3015, text: part("00-work-id.js") },
 	{ name: "puzzle-page-list", start: 3051, end: 3058, text: part("01-puzzle-resolve.js") },
@@ -74,7 +74,7 @@ if (text.split(beforeSetter).length !== 2) throw new Error("未找到唯一的 v
 text = text.replace(beforeSetter, afterSetter);
 
 // —— fork 元数据：发布到自己的仓库时只需改这里 ——
-// 只重写输出文件的油猴头，dlsite.txt 始终保持字节不变（行号锚点依赖它）。
+// 只重写输出文件的油猴头，上游产物始终保持字节不变（行号锚点依赖它）。
 const FORK = {
 	name: "DLscrape",
 	author: "cpufan, operLin",
