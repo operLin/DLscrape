@@ -280,7 +280,7 @@ async function executeDownloadJob(job, options, handlers) {
 				emit({ type: "zip-skipped", total });
 				return result;
 			}
-			throw new Error("全部页面下载失败，无法生成压缩包");
+			throw new Error(typeof dpdT === "function" ? dpdT("error.allPagesFailed") : "全部页面下载失败，无法生成压缩包");
 		}
 		emit({ type: "zip-start", total });
 		const zipped = await buildZip(zipFiles);

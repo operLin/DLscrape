@@ -10,7 +10,7 @@ var hookXorEnc = () => {
 			fn(value);
 		};
 		const timer = setTimeout(() => {
-			finish(reject, new Error("等待页面数据超时：没有捕获到页面文件请求，该作品可能使用了尚未支持的加密方式"));
+			finish(reject, new Error(typeof dpdT === "function" ? dpdT("error.metaTimeout") : "等待页面数据超时：没有捕获到页面文件请求，该作品可能使用了尚未支持的加密方式"));
 		}, DPD_DETECT_TIMEOUT_MS);
 		Promise.all([
 			hookXorKey(),
@@ -22,7 +22,7 @@ var hookXorEnc = () => {
 			origConsole.log("xor key ", encDetectorKey);
 			origConsole.log("binUrl  ", binUrl);
 			if (!binUrl) {
-				finish(reject, new Error("没有捕获到页面文件请求，无法确定下载地址"));
+				finish(reject, new Error(typeof dpdT === "function" ? dpdT("error.noPageRequests") : "没有捕获到页面文件请求，无法确定下载地址"));
 				return;
 			}
 			const encBinUrls = makeEncBinUrls(binUrl, viewerMeta);

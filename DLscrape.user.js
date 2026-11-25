@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         DLscrape
 // @namespace    https://github.com/operLin/DLscrape
-// @version      2.4.0
+// @version      2.5.0
 // @author       cpufan, operLin
-// @description  在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名、支持 comipo Play）
+// @description  在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名、中英文界面、支持 comipo Play）
 // @license      MIT
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=dlsite.com
 // @supportURL   https://github.com/operLin/DLscrape/issues
@@ -3670,7 +3670,7 @@ async function executeDownloadJob(job, options, handlers) {
 				emit({ type: "zip-skipped", total });
 				return result;
 			}
-			throw new Error("全部页面下载失败，无法生成压缩包");
+			throw new Error(typeof dpdT === "function" ? dpdT("error.allPagesFailed") : "全部页面下载失败，无法生成压缩包");
 		}
 		emit({ type: "zip-start", total });
 		const zipped = await buildZip(zipFiles);
@@ -8323,7 +8323,7 @@ var hookXorEnc = () => {
 			fn(value);
 		};
 		const timer = setTimeout(() => {
-			finish(reject, new Error("等待页面数据超时：没有捕获到页面文件请求，该作品可能使用了尚未支持的加密方式"));
+			finish(reject, new Error(typeof dpdT === "function" ? dpdT("error.metaTimeout") : "等待页面数据超时：没有捕获到页面文件请求，该作品可能使用了尚未支持的加密方式"));
 		}, DPD_DETECT_TIMEOUT_MS);
 		Promise.all([
 			hookXorKey(),
@@ -8335,7 +8335,7 @@ var hookXorEnc = () => {
 			origConsole.log("xor key ", encDetectorKey);
 			origConsole.log("binUrl  ", binUrl);
 			if (!binUrl) {
-				finish(reject, new Error("没有捕获到页面文件请求，无法确定下载地址"));
+				finish(reject, new Error(typeof dpdT === "function" ? dpdT("error.noPageRequests") : "没有捕获到页面文件请求，无法确定下载地址"));
 				return;
 			}
 			const encBinUrls = makeEncBinUrls(binUrl, viewerMeta);
@@ -8700,6 +8700,7 @@ var DPD_CSS = `
 .dpd-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:8px;font-size:11px;font-weight:500;letter-spacing:.5px;color:var(--md-on-primary-container);background:var(--md-primary-container)}
 .dpd-chip.is-xor{color:var(--md-on-tertiary-container);background:var(--md-tertiary-container)}
 .dpd-ghost{width:32px;height:32px;border:0;border-radius:50%;background:transparent;color:var(--md-on-surface-variant);font-size:16px;line-height:1;cursor:pointer;padding:0;transition:background .15s}
+.dpd-lang{font-size:12px;letter-spacing:.5px;font-weight:500}
 .dpd-ghost:hover{background:var(--md-hover);color:var(--md-on-surface)}
 .dpd-body{display:flex;flex-direction:column;gap:16px;padding:16px;overflow-y:auto;overscroll-behavior:contain}
 .dpd-body::-webkit-scrollbar{width:8px}
@@ -8773,6 +8774,226 @@ var DPD_CSS = `
 .dpd-log-line{line-break:anywhere}
 `;
 _css(DPD_CSS);
+// ————— 多语言：中文 / English —————
+// 语言优先级：unsafeWindow.__dpdLang（调试与自动化测试用）> localStorage 记忆 > 浏览器语言（zh* → 中文，其余 → English）。
+var DPD_LANG_KEY = "dpd-lang";
+var DPD_STRINGS = {
+	zh: {
+		"method.xor": "XOR 解密",
+		"method.puzzle": "拼图还原",
+		"method.short.xor": "XOR 解密",
+		"method.short.puzzle": "拼图还原",
+		"chip.puzzle": "拼图",
+		"chip.detecting": "检测中",
+		"header.expandTitle": "点击展开",
+		"header.collapseTitle": "点击收起",
+		"header.expand": "展开",
+		"header.collapse": "收起",
+		"sub.error": "出错，详见日志",
+		"sub.detecting": "正在检测加密方式…",
+		"sub.waiting": "等待作品页",
+		"sub.waitingComipo": "comipo · 等待作品页",
+		"sub.running": "下载中 {done}/{total}",
+		"sub.zippingSuffix": " · 打包中",
+		"sub.cancellingSuffix": " · 正在取消",
+		"sub.cancelled": "已取消：成功 {ok} / 失败 {fail}",
+		"sub.finished": "完成：成功 {ok} / 失败 {fail}",
+		"common.pages": "共 {count} 页",
+		"hint.detecting": "正在检测该作品的加密方式…",
+		"hint.dlsite": "打开 DLsite Play 作品阅读页后自动检测",
+		"hint.comipo": "打开 comipo Play 作品阅读页后自动检测",
+		"range.title": "页码范围",
+		"range.all": "全部",
+		"range.selected": "当前选中 {count} 页",
+		"mode.title": "输出方式",
+		"mode.image": "逐页",
+		"mode.zip": "压缩",
+		"mode.jpg": "JPG · 体积小、有损",
+		"mode.png": "PNG · 无损、体积较大",
+		"mode.tipZip": "打包成 ZIP 后一次性保存，包内所有图片统一为 {format}",
+		"mode.tipDir": "直接输出 {format} 图片，可选择保存文件夹",
+		"mode.tipDownload": "直接输出 {format} 图片，浏览器逐个保存",
+		"naming.title": "文件命名",
+		"naming.page": "页号",
+		"naming.seq": "顺序",
+		"naming.original": "原始",
+		"naming.labelPage": "按页号重命名",
+		"naming.labelSeq": "按下载顺序重命名",
+		"naming.labelOriginal": "保留原始名称",
+		"naming.digits": "{count} 位",
+		"naming.examplePage": "示例：{first}.{ext}、{second}.{ext}（用原始页号，只下 10–20 页就是 010–020）",
+		"naming.exampleSeq": "示例：第一个文件 {first}.{ext}，与原始页号无关",
+		"naming.exampleOriginal": "示例：保留 DLsite 原始文件名，扩展名校正为 .{ext}",
+		"concurrency.title": "并发数",
+		"concurrency.value": "{count} 线程",
+		"actions.start": "开始下载",
+		"actions.cancel": "取消下载",
+		"actions.restart": "重新下载",
+		"actions.saveZip": "保存压缩包",
+		"actions.savePartial": "保存不完整压缩包",
+		"progress.title": "任务进度",
+		"progress.ok": "成功 {count}",
+		"progress.fail": "失败 {count}",
+		"progress.skip": "跳过 {count}",
+		"progress.zipping": "打包中…",
+		"progress.cancelling": "正在取消",
+		"progress.filterAll": "全部 {count}",
+		"progress.filterFailed": "失败 {count}",
+		"row.pending": "等待中",
+		"row.active": "下载中…",
+		"row.skipped": "已跳过",
+		"log.detecting": "正在检测加密方式…",
+		"log.detected": "检测到{method}，共 {count} 页",
+		"log.detectFailed": "检测失败：{message}",
+		"log.start": "开始下载 {count} 页（{mode} · {format} · {naming}）",
+		"log.savedTo": "保存位置：{name}",
+		"log.cancelNoDir": "已取消：未选择保存位置",
+		"log.dirUnavailable": "目录选择不可用，改为逐个保存文件",
+		"log.cancelNotStarted": "已取消：未开始下载",
+		"log.noDirSerial": "未选择文件夹：浏览器会拦截批量下载，已改为单线程逐个保存",
+		"log.pageError": "✗ 第 {page} 页：{message}",
+		"log.zipStart": "正在打包 ZIP…",
+		"log.zipDone": "ZIP 已就绪：{size} MB",
+		"log.cancelled": "已取消：{summary}",
+		"log.zipFinished": "打包完成：{summary}",
+		"log.downloadFinished": "下载完成：{summary}",
+		"log.failed": "下载失败：{message}",
+		"log.cancelRequested": "已请求取消，正在停止…",
+		"summary.basic": "成功 {ok} / 失败 {fail}",
+		"summary.skipSuffix": " / 跳过 {skip}",
+		"summary.partialSuffix": "（可保存不完整压缩包）",
+		"error.noDetector": "没有可用的检测方式",
+		"error.unknownScheme": "没能识别该作品的加密方式",
+		"error.allPagesFailed": "全部页面下载失败，无法生成压缩包",
+		"error.metaTimeout": "等待页面数据超时：没有捕获到页面文件请求，该作品可能使用了尚未支持的加密方式",
+		"error.noPageRequests": "没有捕获到页面文件请求，无法确定下载地址"
+	},
+	en: {
+		"method.xor": "XOR decryption",
+		"method.puzzle": "puzzle reassembly",
+		"method.short.xor": "XOR",
+		"method.short.puzzle": "Puzzle",
+		"chip.puzzle": "Puzzle",
+		"chip.detecting": "Detecting",
+		"header.expandTitle": "Click to expand",
+		"header.collapseTitle": "Click to collapse",
+		"header.expand": "Expand",
+		"header.collapse": "Collapse",
+		"sub.error": "Error — see log",
+		"sub.detecting": "Detecting encryption…",
+		"sub.waiting": "Waiting for a work page",
+		"sub.waitingComipo": "comipo · waiting for a work page",
+		"sub.running": "Downloading {done}/{total}",
+		"sub.zippingSuffix": " · packing",
+		"sub.cancellingSuffix": " · cancelling",
+		"sub.cancelled": "Cancelled: {ok} ok / {fail} failed",
+		"sub.finished": "Done: {ok} ok / {fail} failed",
+		"common.pages": "{count} pages",
+		"hint.detecting": "Detecting how this work is encrypted…",
+		"hint.dlsite": "Open a DLsite Play reading page — detection runs automatically",
+		"hint.comipo": "Open a comipo Play reading page — detection runs automatically",
+		"range.title": "Page range",
+		"range.all": "All",
+		"range.selected": "{count} pages selected",
+		"mode.title": "Output",
+		"mode.image": "Per page",
+		"mode.zip": "ZIP",
+		"mode.jpg": "JPG · smaller, lossy",
+		"mode.png": "PNG · lossless, larger",
+		"mode.tipZip": "Packed into one ZIP and saved at once; every image inside is {format}",
+		"mode.tipDir": "Writes {format} images into a folder you pick",
+		"mode.tipDownload": "Writes {format} images, saved one by one by the browser",
+		"naming.title": "File naming",
+		"naming.page": "Page no.",
+		"naming.seq": "Sequential",
+		"naming.original": "Original",
+		"naming.labelPage": "Rename by page number",
+		"naming.labelSeq": "Rename in download order",
+		"naming.labelOriginal": "Keep original names",
+		"naming.digits": "{count} digits",
+		"naming.examplePage": "e.g. {first}.{ext}, {second}.{ext} — original page numbers, so pages 10–20 become 010–020",
+		"naming.exampleSeq": "e.g. the first file is {first}.{ext}, independent of the original page numbers",
+		"naming.exampleOriginal": "e.g. keep DLsite's original filename, extension corrected to .{ext}",
+		"concurrency.title": "Concurrency",
+		"concurrency.value": "{count} threads",
+		"actions.start": "Start download",
+		"actions.cancel": "Cancel",
+		"actions.restart": "Download again",
+		"actions.saveZip": "Save ZIP",
+		"actions.savePartial": "Save partial ZIP",
+		"progress.title": "Progress",
+		"progress.ok": "{count} ok",
+		"progress.fail": "{count} failed",
+		"progress.skip": "{count} skipped",
+		"progress.zipping": "Packing…",
+		"progress.cancelling": "Cancelling…",
+		"progress.filterAll": "All {count}",
+		"progress.filterFailed": "Failed {count}",
+		"row.pending": "Queued",
+		"row.active": "Downloading…",
+		"row.skipped": "Skipped",
+		"log.detecting": "Detecting encryption…",
+		"log.detected": "Detected {method} · {count} pages",
+		"log.detectFailed": "Detection failed: {message}",
+		"log.start": "Starting {count} pages ({mode} · {format} · {naming})",
+		"log.savedTo": "Saving to: {name}",
+		"log.cancelNoDir": "Cancelled: no folder selected",
+		"log.dirUnavailable": "Folder picker unavailable — saving file by file",
+		"log.cancelNotStarted": "Cancelled before starting",
+		"log.noDirSerial": "No folder selected: the browser would block bulk downloads, so pages are saved one at a time",
+		"log.pageError": "✗ Page {page}: {message}",
+		"log.zipStart": "Packing ZIP…",
+		"log.zipDone": "ZIP ready: {size} MB",
+		"log.cancelled": "Cancelled: {summary}",
+		"log.zipFinished": "ZIP finished: {summary}",
+		"log.downloadFinished": "Download finished: {summary}",
+		"log.failed": "Download failed: {message}",
+		"log.cancelRequested": "Cancel requested — stopping…",
+		"summary.basic": "{ok} ok / {fail} failed",
+		"summary.skipSuffix": " / {skip} skipped",
+		"summary.partialSuffix": " (partial ZIP available)",
+		"error.noDetector": "No detection method available",
+		"error.unknownScheme": "Could not identify this work's encryption scheme",
+		"error.allPagesFailed": "All pages failed — cannot build the ZIP",
+		"error.metaTimeout": "Timed out waiting for page data: no page-file requests were captured; this work may use an unsupported encryption scheme",
+		"error.noPageRequests": "No page-file requests were captured — cannot determine the download URLs"
+	}
+};
+function dpdReadStoredLang() {
+	try {
+		var forced = typeof _unsafeWindow !== "undefined" && _unsafeWindow && _unsafeWindow.__dpdLang;
+		if (forced === "zh" || forced === "en") return forced;
+	} catch (err) {}
+	try {
+		var saved = localStorage.getItem(DPD_LANG_KEY);
+		if (saved === "zh" || saved === "en") return saved;
+	} catch (err) {}
+	var lang = typeof navigator !== "undefined" && navigator && navigator.language ? String(navigator.language) : "";
+	return /^zh/i.test(lang) ? "zh" : "en";
+}
+var dpdLang = dpdReadStoredLang();
+function dpdPersistLang(lang) {
+	try {
+		localStorage.setItem(DPD_LANG_KEY, lang);
+	} catch (err) {}
+}
+/** 取文案：{name} 占位符按 vars 替换；缺键回退中文，再回退键名。 */
+function dpdText(key, vars, lang) {
+	var table = DPD_STRINGS[lang] || DPD_STRINGS.zh;
+	var text = table[key];
+	if (text == null) text = DPD_STRINGS.zh[key];
+	if (text == null) return key;
+	if (vars) {
+		text = String(text).replace(/\{(\w+)\}/g, function (match, name) {
+			return vars[name] == null ? match : String(vars[name]);
+		});
+	}
+	return text;
+}
+/** 供内核/检测链路（不在组件作用域内）使用，跟随面板当前语言。 */
+function dpdT(key, vars) {
+	return dpdText(key, vars, dpdLang);
+}
 // 页面真实 window（unsafeWindow）：既用于跨帧判断，也用于跨实例去重标记。
 var DPD_REAL_WINDOW = _unsafeWindow || window;
 /** 是否运行在 iframe 里（跨域取不到 top 时按顶层处理，避免整块 UI 不显示）。 */
@@ -8801,6 +9022,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			detected: false,
 			method: "",
 			platform: "dlsite",
+			lang: dpdLang,
 			zipFileName: "",
 			error: "",
 			mode: "image",
@@ -8829,6 +9051,16 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			logs: []
 		});
 		// 顶层帧对外公开「是否已检测到作品」，子帧据此让位，避免 iframe 里再挂一个下载器。
+		/** 取文案：跟随 state.lang，切换语言时整块面板重新渲染。 */
+		function t(key, vars) {
+			return dpdText(key, vars, state.lang);
+		}
+		function toggleLang() {
+			const next = state.lang === "zh" ? "en" : "zh";
+			state.lang = next;
+			dpdLang = next;
+			dpdPersistLang(next);
+		}
 		const isSubFrame = dpdIsSubFrame();
 		let hostState = null;
 		if (isSubFrame) {
@@ -8915,7 +9147,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			if (state.attaching || state.detected) return;
 			const version = stateVersion;
 			state.attaching = true;
-			addLog("正在检测加密方式…");
+			addLog(t("log.detecting"));
 			const workNo = extractDlsiteId(window.location.href);
 			// comipo Play：优先自己解析内容接口（不依赖页面请求的时机），失败再等页面自身的请求。
 			const detectors = state.platform === "comipo" ? [resolveComipoPages(workNo), hookXorEnc()] : [hookXorEnc(), hookFetchPuzzle()];
@@ -8939,12 +9171,12 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 						hostState.detected = true;
 					}
 				}
-				addLog(`检测到${result.method === "xor" ? " XOR 解密" : "拼图还原"}，共 ${state.pageCount} 页`);
+				addLog(t("log.detected", { method: t(result.method === "xor" ? "method.xor" : "method.puzzle"), count: state.pageCount }));
 			}).catch((err) => {
 				if (version !== stateVersion) return;
 				origConsole.error(err);
 				state.error = err && err.message ? err.message : String(err);
-				addLog("检测失败：" + state.error);
+				addLog(t("log.detectFailed", { message: state.error }));
 			}).finally(() => {
 				if (version !== stateVersion) return;
 				state.attaching = false;
@@ -9005,7 +9237,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			state.error = "";
 			state.onlyFailed = false;
 			updateProgress();
-			addLog(`开始下载 ${selected.length} 页（${state.mode === "image" ? "逐页" : "压缩"} · ${state.format.toUpperCase()} · ${namingLabel()}）`);
+			addLog(t("log.start", { count: selected.length, mode: t(state.mode === "image" ? "mode.image" : "mode.zip"), format: state.format.toUpperCase(), naming: namingLabel() }));
 			let directory = null;
 			if (state.mode === "image" && _unsafeWindow && typeof _unsafeWindow.showDirectoryPicker === "function") {
 				try {
@@ -9013,22 +9245,22 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 						id: "dlsite-play-downloader",
 						mode: "readwrite"
 					});
-					addLog(`保存位置：${directory.name}`);
+					addLog(t("log.savedTo", { name: directory.name }));
 				} catch (err) {
 					if (err && err.name === "AbortError") {
-						addLog("已取消：未选择保存位置");
+						addLog(t("log.cancelNoDir"));
 						state.running = false;
 						state.entries = [];
 						state.total = 0;
 						updateProgress();
 						return;
 					}
-					addLog("目录选择不可用，改为逐个保存文件");
+					addLog(t("log.dirUnavailable"));
 					origConsole.warn("[download] showDirectoryPicker failed", err);
 				}
 			}
 			if (state.cancelled) {
-				addLog("已取消：未开始下载");
+				addLog(t("log.cancelNotStarted"));
 				state.running = false;
 				state.entries = [];
 				state.total = 0;
@@ -9037,7 +9269,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			}
 			if (version !== stateVersion) return;
 			if (state.mode === "image" && !directory) {
-				addLog("未选择文件夹：浏览器会拦截批量下载，已改为单线程逐个保存");
+				addLog(t("log.noDirSerial"));
 			}
 			try {
 				const result = await executeDownloadJob({
@@ -9077,7 +9309,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 							}
 							state.failed++;
 							updateProgress();
-							addLog(`✗ 第 ${event.pageNo} 页：${event.message}`);
+							addLog(t("log.pageError", { page: event.pageNo, message: event.message }));
 						} else if (event.type === "skipped") {
 							const entry = entryMap.get(event.pageNo);
 							if (entry) entry.status = "skipped";
@@ -9085,10 +9317,10 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 							updateProgress();
 						} else if (event.type === "zip-start") {
 							state.zipping = true;
-							addLog("正在打包 ZIP…");
+							addLog(t("log.zipStart"));
 						} else if (event.type === "zip-done") {
 							state.zipping = false;
-							addLog(`ZIP 已就绪：${(event.bytes / 1048576).toFixed(1)} MB`);
+							addLog(t("log.zipDone", { size: (event.bytes / 1048576).toFixed(1) }));
 						} else if (event.type === "zip-skipped") {
 							state.zipping = false;
 						}
@@ -9097,26 +9329,26 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 				if (version !== stateVersion) return;
 				saveFunc = result.save;
 				lastBlobUrl = result.blobUrl;
-				const summary = `成功 ${result.successCount} / 失败 ${result.failCount}${result.skippedCount ? ` / 跳过 ${result.skippedCount}` : ""}`;
+				const summary = t("summary.basic", { ok: result.successCount, fail: result.failCount }) + (result.skippedCount ? t("summary.skipSuffix", { skip: result.skippedCount }) : "");
 				const incomplete = result.cancelled && result.successCount + result.failCount < result.total;
 				if (incomplete) {
 					state.cancelled = true;
 					state.finished = false;
 					state.finishedMode = "";
 					state.partialMode = result.save ? state.mode : "";
-					addLog(`已取消：${summary}${state.partialMode ? "（可保存不完整压缩包）" : ""}`);
+					addLog(t("log.cancelled", { summary }) + (state.partialMode ? t("summary.partialSuffix") : ""));
 				} else {
 					state.cancelled = false;
 					state.finished = true;
 					state.finishedMode = state.mode;
 					state.partialMode = "";
-					addLog(state.mode === "zip" ? `打包完成：${summary}` : `下载完成：${summary}`);
+					addLog(state.mode === "zip" ? t("log.zipFinished", { summary }) : t("log.downloadFinished", { summary }));
 				}
 			} catch (err) {
 				if (version !== stateVersion) return;
 				origConsole.error(err);
 				state.error = err && err.message ? err.message : String(err);
-				addLog("下载失败：" + state.error);
+				addLog(t("log.failed", { message: state.error }));
 			} finally {
 				if (version === stateVersion) {
 					state.running = false;
@@ -9126,7 +9358,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		}
 		function cancel() {
 			state.cancelled = true;
-			addLog("已请求取消，正在停止…");
+			addLog(t("log.cancelRequested"));
 		}
 		function save() {
 			if (saveFunc) saveFunc();
@@ -9136,14 +9368,14 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			state.to = state.pageCount || 1;
 		}
 		function headerSubtitle() {
-			if (state.error) return "出错，详见日志";
-			if (state.attaching) return "正在检测加密方式…";
-			if (!state.detected) return state.platform === "comipo" ? "comipo · 等待作品页" : "等待作品页";
+			if (state.error) return t("sub.error");
+			if (state.attaching) return t("sub.detecting");
+			if (!state.detected) return state.platform === "comipo" ? t("sub.waitingComipo") : t("sub.waiting");
 			const done = state.success + state.failed + state.skipped;
-			if (state.running) return `下载中 ${done}/${state.total}${state.zipping ? " · 打包中" : ""}${state.cancelled ? " · 正在取消" : ""}`;
-			if (state.cancelled) return `已取消：成功 ${state.success} / 失败 ${state.failed}${state.skipped ? ` / 跳过 ${state.skipped}` : ""}`;
-			if (state.finished) return `完成：成功 ${state.success} / 失败 ${state.failed}`;
-			return `${state.platform === "comipo" ? "comipo · " : ""}${state.method === "xor" ? "XOR 解密" : "拼图还原"} · 共 ${state.pageCount} 页`;
+			if (state.running) return t("sub.running", { done, total: state.total }) + (state.zipping ? t("sub.zippingSuffix") : "") + (state.cancelled ? t("sub.cancellingSuffix") : "");
+			if (state.cancelled) return t("sub.cancelled", { ok: state.success, fail: state.failed }) + (state.skipped ? t("summary.skipSuffix", { skip: state.skipped }) : "");
+			if (state.finished) return t("sub.finished", { ok: state.success, fail: state.failed });
+			return `${t(state.method === "xor" ? "method.short.xor" : "method.short.puzzle")} · ${t("common.pages", { count: state.pageCount })}`;
 		}
 		function visibleEntries() {
 			const list = state.onlyFailed ? state.entries.filter((entry) => entry.status === "error") : state.entries;
@@ -9151,20 +9383,20 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			return state.onlyFailed ? list.slice(0, 400) : list.slice(list.length - 400);
 		}
 		const NAMING_OPTIONS = [
-			["page", "页号"],
-			["seq", "顺序"],
-			["original", "原始"]
+			["page", "naming.page"],
+			["seq", "naming.seq"],
+			["original", "naming.original"]
 		];
 		function namingLabel() {
-			if (state.naming === "seq") return "按下载顺序重命名";
-			if (state.naming === "original") return "保留原始名称";
-			return "按页号重命名";
+			if (state.naming === "seq") return t("naming.labelSeq");
+			if (state.naming === "original") return t("naming.labelOriginal");
+			return t("naming.labelPage");
 		}
 		function namingExample() {
 			const ext = state.format;
-			if (state.naming === "seq") return `示例：第一个文件 ${padPageNumber(1, state.digits)}.${ext}，与原始页号无关`;
-			if (state.naming === "original") return `示例：保留 DLsite 原始文件名，扩展名校正为 .${ext}`;
-			return `示例：${padPageNumber(1, state.digits)}.${ext}、${padPageNumber(12, state.digits)}.${ext}（用原始页号，只下 10–20 页就是 010–020）`;
+			if (state.naming === "seq") return t("naming.exampleSeq", { first: padPageNumber(1, state.digits), ext });
+			if (state.naming === "original") return t("naming.exampleOriginal", { ext });
+			return t("naming.examplePage", { first: padPageNumber(1, state.digits), second: padPageNumber(12, state.digits), ext });
 		}
 		/** 进度列表左侧编号：顺序模式显示下载序号，其余显示原始页号。 */
 		function rowLabel(entry) {
@@ -9183,8 +9415,8 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		function sectionRange() {
 			return h("div", { class: "dpd-block" }, [
 				h("div", { class: "dpd-label" }, [
-					h("span", null, "页码范围"),
-					h("span", { class: "dpd-label-extra" }, `共 ${state.pageCount} 页`)
+					h("span", null, t("range.title")),
+					h("span", { class: "dpd-label-extra" }, t("common.pages", { count: state.pageCount }))
 				]),
 				h("div", { class: "dpd-range" }, [
 					h("input", {
@@ -9214,22 +9446,22 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 						class: "dpd-mini",
 						disabled: state.running,
 						onClick: selectAllPages
-					}, "全部")
+					}, t("range.all"))
 				]),
-				h("div", { class: "dpd-tip" }, `当前选中 ${selectedCount()} 页`)
+				h("div", { class: "dpd-tip" }, t("range.selected", { count: selectedCount() }))
 			]);
 		}
 		function sectionMode() {
 			return h("div", { class: "dpd-block" }, [
 				h("div", { class: "dpd-label" }, [
-					h("span", null, "输出方式"),
-					h("span", { class: "dpd-label-extra" }, state.format === "png" ? "PNG · 无损、体积较大" : "JPG · 体积小、有损")
+					h("span", null, t("mode.title")),
+					h("span", { class: "dpd-label-extra" }, t(state.format === "png" ? "mode.png" : "mode.jpg"))
 				]),
 				h("div", { class: "dpd-row-inline" }, [
 					h("div", { class: ["dpd-switch", state.mode === "zip" ? "is-right" : "is-left"] }, [
 						h("div", { class: "dpd-switch-knob" }),
-						optionSwitch("mode", "image", "逐页", state.mode, state.running),
-						optionSwitch("mode", "zip", "压缩", state.mode, state.running)
+						optionSwitch("mode", "image", t("mode.image"), state.mode, state.running),
+						optionSwitch("mode", "zip", t("mode.zip"), state.mode, state.running)
 					]),
 					h("div", { class: ["dpd-switch", "dpd-format", state.format === "png" ? "is-right" : "is-left"] }, [
 						h("div", { class: "dpd-switch-knob" }),
@@ -9242,21 +9474,21 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		}
 		function modeTip() {
 			const upper = state.format.toUpperCase();
-			if (state.mode === "zip") return `打包成 ZIP 后一次性保存，包内所有图片统一为 ${upper}`;
-			if (typeof (_unsafeWindow && _unsafeWindow.showDirectoryPicker) === "function") return `直接输出 ${upper} 图片，可选择保存文件夹`;
-			return `直接输出 ${upper} 图片，浏览器逐个保存`;
+			if (state.mode === "zip") return t("mode.tipZip", { format: upper });
+			if (typeof (_unsafeWindow && _unsafeWindow.showDirectoryPicker) === "function") return t("mode.tipDir", { format: upper });
+			return t("mode.tipDownload", { format: upper });
 		}
 		function sectionNaming() {
 			const position = Math.max(0, NAMING_OPTIONS.findIndex((option) => option[0] === state.naming));
 			return h("div", { class: "dpd-block" }, [
 				h("div", { class: "dpd-label" }, [
-					h("span", null, "文件命名"),
+					h("span", null, t("naming.title")),
 					h("span", { class: "dpd-label-extra" }, namingLabel())
 				]),
 				h("div", { class: "dpd-row-inline" }, [
 					h("div", { class: ["dpd-switch", "is-3grid", "pos-" + position] }, [
 						h("div", { class: "dpd-switch-knob" }),
-						...NAMING_OPTIONS.map(([value, label]) => optionSwitch("naming", value, label, state.naming, state.running))
+						...NAMING_OPTIONS.map(([value, label]) => optionSwitch("naming", value, t(label), state.naming, state.running))
 					]),
 					state.naming === "original" ? null : h("select", {
 						class: "dpd-select",
@@ -9268,7 +9500,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 					}, [2, 3, 4, 5].map((count) => h("option", {
 						value: count,
 						selected: state.digits === count
-					}, `${count} 位`)))
+					}, t("naming.digits", { count }))))
 				]),
 				h("div", { class: "dpd-tip" }, namingExample())
 			]);
@@ -9276,8 +9508,8 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 		function sectionConcurrency() {
 			return h("div", { class: "dpd-block" }, [
 				h("div", { class: "dpd-label" }, [
-					h("span", null, "并发数"),
-					h("span", { class: "dpd-label-extra" }, `${state.concurrency} 线程`)
+					h("span", null, t("concurrency.title")),
+					h("span", { class: "dpd-label-extra" }, t("concurrency.value", { count: state.concurrency }))
 				]),
 				h("input", {
 					class: "dpd-slider",
@@ -9302,29 +9534,29 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 				buttons.push(h("button", {
 					class: "dpd-btn is-danger",
 					onClick: cancel
-				}, "取消下载"));
+				}, t("actions.cancel")));
 			} else if (saveAvailable) {
 				buttons.push(h("button", {
 					class: "dpd-btn is-primary",
 					onClick: save
-				}, state.partialMode === "zip" ? "保存不完整压缩包" : "保存压缩包"));
+				}, t(state.partialMode === "zip" ? "actions.savePartial" : "actions.saveZip")));
 				buttons.push(h("button", {
 					class: "dpd-btn is-ghost",
 					onClick: start
-				}, "重新下载"));
+				}, t("actions.restart")));
 			} else {
 				buttons.push(h("button", {
 					class: "dpd-btn is-primary",
 					disabled: !state.detected,
 					onClick: start
-				}, finishedHere ? "重新下载" : "开始下载"));
+				}, t(finishedHere ? "actions.restart" : "actions.start")));
 			}
 			return h("div", { class: "dpd-actions" }, buttons);
 		}
 		function sectionProgress() {
 			return h("div", { class: "dpd-block dpd-progress-block" }, [
 				h("div", { class: "dpd-label" }, [
-					h("span", null, "任务进度"),
+					h("span", null, t("progress.title")),
 					h("span", { class: "dpd-label-extra" }, `${state.success + state.failed + state.skipped}/${state.total || 0}`)
 				]),
 				h("div", { class: "dpd-bar" }, [
@@ -9334,12 +9566,12 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 					})
 				]),
 				h("div", { class: "dpd-stats" }, [
-					h("span", { class: "dpd-stat is-ok" }, `成功 ${state.success}`),
-					h("span", { class: "dpd-stat is-err" }, `失败 ${state.failed}`),
-					state.skipped ? h("span", { class: "dpd-stat is-warn" }, `跳过 ${state.skipped}`) : null,
+					h("span", { class: "dpd-stat is-ok" }, t("progress.ok", { count: state.success })),
+					h("span", { class: "dpd-stat is-err" }, t("progress.fail", { count: state.failed })),
+					state.skipped ? h("span", { class: "dpd-stat is-warn" }, t("progress.skip", { count: state.skipped })) : null,
 					h("span", { class: "dpd-stat" }, `${state.progress}%`),
-					state.zipping ? h("span", { class: "dpd-stat is-warn" }, "打包中…") : null,
-					state.cancelled && state.running ? h("span", { class: "dpd-stat is-warn" }, "正在取消") : null
+					state.zipping ? h("span", { class: "dpd-stat is-warn" }, t("progress.zipping")) : null,
+					state.cancelled && state.running ? h("span", { class: "dpd-stat is-warn" }, t("progress.cancelling")) : null
 				]),
 				h("div", { class: "dpd-filters" }, [
 					h("button", {
@@ -9347,13 +9579,13 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 						onClick: () => {
 							state.onlyFailed = false;
 						}
-					}, `全部 ${state.entries.length}`),
+					}, t("progress.filterAll", { count: state.entries.length })),
 					h("button", {
 						class: ["dpd-mini", state.onlyFailed ? "is-on" : ""],
 						onClick: () => {
 							state.onlyFailed = true;
 						}
-					}, `失败 ${state.failed}`)
+					}, t("progress.filterFailed", { count: state.failed }))
 				]),
 				h("div", { class: "dpd-list" }, visibleEntries().map((entry) => h("div", {
 					class: ["dpd-row", "is-" + entry.status],
@@ -9361,7 +9593,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 				}, [
 					h("span", { class: "dpd-row-no" }, rowLabel(entry)),
 					h("span", { class: "dpd-row-icon" }, entry.status === "ok" ? "✓" : entry.status === "error" ? "✗" : entry.status === "skipped" ? "⏹" : entry.status === "active" ? "•" : "·"),
-					h("span", { class: "dpd-row-text" }, entry.status === "error" ? entry.error : entry.name || (entry.status === "skipped" ? "已跳过" : entry.status === "active" ? "下载中…" : "等待中"))
+					h("span", { class: "dpd-row-text" }, entry.status === "error" ? entry.error : entry.name || (entry.status === "skipped" ? t("row.skipped") : entry.status === "active" ? t("row.active") : t("row.pending")))
 				])))
 			]);
 		}
@@ -9400,7 +9632,7 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 			return h("div", { class: ["dpd-panel", state.collapsed ? "is-collapsed" : "", state.platform === "comipo" ? "is-comipo" : ""] }, [
 			h("div", {
 				class: "dpd-head",
-				title: state.collapsed ? "点击展开" : "点击收起",
+				title: state.collapsed ? t("header.expandTitle") : t("header.collapseTitle"),
 				onClick: () => {
 					state.collapsed = !state.collapsed;
 				}
@@ -9411,13 +9643,14 @@ var App_default = /*#__PURE__*/ _plugin_vue_export_helper_default({
 					h("div", { class: "dpd-sub" }, headerSubtitle())
 				]),
 				h("div", { class: "dpd-head-actions" }, [
-					state.detected || state.platform === "comipo" ? h("span", { class: ["dpd-chip", state.method === "xor" ? "is-xor" : ""] }, state.platform === "comipo" ? "comipo" : state.detected ? state.method === "xor" ? "XOR" : "拼图" : "检测中") : null,
-					h("button", { class: "dpd-ghost", title: state.collapsed ? "展开" : "收起" }, state.collapsed ? "‹" : "›")
+					state.detected || state.platform === "comipo" ? h("span", { class: ["dpd-chip", state.method === "xor" ? "is-xor" : ""] }, state.platform === "comipo" ? "comipo" : state.detected ? state.method === "xor" ? "XOR" : t("chip.puzzle") : t("chip.detecting")) : null,
+					h("button", { class: "dpd-ghost dpd-lang", title: state.lang === "zh" ? "Switch to English" : "切换为中文", onClick: (event) => { event.stopPropagation(); toggleLang(); } }, state.lang === "zh" ? "EN" : "中"),
+					h("button", { class: "dpd-ghost", title: state.collapsed ? t("header.expand") : t("header.collapse") }, state.collapsed ? "‹" : "›")
 				])
 			]),
 			h("div", { class: "dpd-body" }, [
 				state.error ? h("div", { class: "dpd-alert" }, state.error) : null,
-				!state.detected ? h("div", { class: "dpd-hint" }, state.attaching ? "正在检测该作品的加密方式…" : state.platform === "comipo" ? "打开 comipo Play 作品阅读页后自动检测" : "打开 DLsite Play 作品阅读页后自动检测") : null,
+				!state.detected ? h("div", { class: "dpd-hint" }, state.attaching ? t("hint.detecting") : state.platform === "comipo" ? t("hint.comipo") : t("hint.dlsite")) : null,
 				state.detected ? sectionRange() : null,
 				state.detected ? sectionMode() : null,
 				state.detected ? sectionNaming() : null,

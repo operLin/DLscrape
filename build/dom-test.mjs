@@ -64,7 +64,8 @@ const pages = Array.from({ length: 6 }, (_, index) => ({
 }));
 
 // 模拟 unsafeWindow：用于验证「同一文档只挂载一个面板」的单例标记
-const fakeUnsafeWindow = {};
+// __dpdLang 显式指定中文，避免测试结果依赖宿主机语言
+const fakeUnsafeWindow = { __dpdLang: "zh" };
 
 // comipo Play 场景的开关（detectPlayPlatform 桩读它，用于在同一个模块里跑两种平台）
 let comipoMode = false;
@@ -447,6 +448,37 @@ check("comipo 逐页下载按页号命名", () => {
 
 check("comipo 解码后的页面计入成功明细", () => {
 	assert(comipoText().includes("成功 3"), comipoText().slice(-400));
+});
+
+console.log("\n[DOM] 语言切换：中文 / English");
+
+const langButton = findButton("EN");
+check("标题栏有语言切换按钮", () => {
+	assert(langButton, "未找到 EN 按钮");
+});
+
+langButton.click();
+await Vue.nextTick();
+await flush();
+
+check("点击 EN 后界面切换为英文", () => {
+	const text = panelText();
+	for (const label of ["Page range", "Output", "File naming", "Concurrency", "Progress"]) {
+		assert(text.includes(label), `缺少英文文案：${label}（${text.slice(-160)}）`);
+	}
+	assert(!text.includes("任务进度"), "仍显示中文进度标题");
+	// 只检查第一个面板（comipo 面板是另一个实例，仍显示中文）
+	const labels = [...window.document.querySelector(".dpd-panel").querySelectorAll("button")].map((el) => el.textContent.trim());
+	assert(labels.includes("Download again"), `缺少英文按钮文案：${labels.join(" | ")}`);
+	assert(!labels.includes("重新下载"), "仍显示中文按钮");
+});
+
+findButton("中").click();
+await Vue.nextTick();
+
+check("切回中文后恢复中文文案", () => {
+	assert(panelText().includes("任务进度"), panelText().slice(-160));
+	assert(findButton("重新下载"), "未恢复中文按钮");
 });
 
 // 放在最后：mountApp 的清场逻辑会移除当前挂在 #app 里的活面板

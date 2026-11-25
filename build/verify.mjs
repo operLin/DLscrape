@@ -93,12 +93,12 @@ check("XOR 链路对 comipo 的兼容改造已就位", () => {
 	assert.ok(out.includes("item.key ?? keyHex"), "单页密钥未支持逐页密钥");
 });
 check("comipo 面板使用绿色 M3 主题", () => {
-	for (const token of [".dpd-panel.is-comipo{--md-primary:#1B6C2D", ".dpd-panel.is-comipo{--md-primary:#8AD68F", 'state.platform === "comipo" ? "is-comipo" : ""', 'state.platform === "comipo" ? "comipo" : state.detected ? state.method === "xor" ? "XOR" : "拼图" : "检测中"', "打开 comipo Play 作品阅读页后自动检测"]) {
+	for (const token of [".dpd-panel.is-comipo{--md-primary:#1B6C2D", ".dpd-panel.is-comipo{--md-primary:#8AD68F", 'state.platform === "comipo" ? "is-comipo" : ""', 't("chip.puzzle")', 't("chip.detecting")', "打开 comipo Play 作品阅读页后自动检测"]) {
 		assert.ok(appCode.includes(token), `绿色主题缺少：${token}`);
 	}
 });
 check("UI 关键控件已渲染", () => {
-	for (const token of ["页码范围", 'optionSwitch("mode", "image", "逐页"', 'optionSwitch("mode", "zip", "压缩"', "按页号重命名", "任务进度", "dpd-switch", "dpd-bar-fill", 'h("div", { class: "dpd-title" }, "DLscrape")']) {
+	for (const token of ["页码范围", 'optionSwitch("mode", "image", t("mode.image")', 'optionSwitch("mode", "zip", t("mode.zip")', "按页号重命名", "任务进度", "dpd-switch", "dpd-bar-fill", 'h("div", { class: "dpd-title" }, "DLscrape")']) {
 		assert.ok(appCode.includes(token), `UI 缺少：${token}`);
 	}
 });
@@ -108,8 +108,28 @@ check("JPG/PNG 输出格式选择已渲染", () => {
 	}
 });
 check("三种命名方式已渲染（页号/顺序/原始）", () => {
-	for (const token of ['["page", "页号"]', '["seq", "顺序"]', '["original", "原始"]', "按下载顺序重命名", "保留原始名称"]) {
+	for (const token of ['["page", "naming.page"]', '["seq", "naming.seq"]', '["original", "naming.original"]', "按下载顺序重命名", "保留原始名称"]) {
 		assert.ok(appCode.includes(token), `UI 缺少：${token}`);
+	}
+});
+check("中英文词条键集合一致", () => {
+	const start = appCode.indexOf("var DPD_STRINGS = {");
+	assert.ok(start >= 0, "未找到 DPD_STRINGS");
+	const open = appCode.indexOf("{", start);
+	const end = appCode.indexOf("\n};", open);
+	assert.ok(end > open, "未找到 DPD_STRINGS 结尾");
+	const table = new Function(`return (${appCode.slice(open, end + 2)});`)();
+	const zh = Object.keys(table.zh).sort();
+	const en = Object.keys(table.en).sort();
+	assert.deepEqual(en, zh, `中英文键不一致：缺英文 ${zh.filter((k) => !en.includes(k))}，缺中文 ${en.filter((k) => !zh.includes(k))}`);
+	for (const key of zh) {
+		assert.ok(String(table.zh[key]).trim().length > 0, `中文词条为空：${key}`);
+		assert.ok(String(table.en[key]).trim().length > 0, `英文词条为空：${key}`);
+	}
+});
+check("语言切换按钮与持久化已注入", () => {
+	for (const token of ["function toggleLang(", "DPD_LANG_KEY", "dpdPersistLang(", "dpdReadStoredLang(", "__dpdLang"]) {
+		assert.ok(appCode.includes(token), `缺少：${token}`);
 	}
 });
 check("重复注入去重逻辑已注入产物", () => {
@@ -675,7 +695,7 @@ const appFactoryOf = new Function(
 		() => new Promise(() => {}),
 		() => Promise.resolve({ method: "puzzle", data: { zipFileName: "wk", pages } }),
 		(value, width) => String(value).padStart(width, "0"),
-		{},
+		{ __dpdLang: "zh" },
 		windowStub,
 		{ pushState() {}, replaceState() {} },
 		documentStub,
@@ -711,6 +731,23 @@ const appFactoryOf = new Function(
 		assert.ok(text.includes("成功 5"), `计数不正确：${text}`);
 		assert.ok(text.includes("001.jpg"), "缺少逐页文件名");
 		assert.ok(text.includes("重新下载"), "缺少重新下载按钮");
+	});
+	const langButton = findByClass(third, "dpd-lang");
+	check("标题栏有语言切换按钮", () => {
+		assert.ok(langButton, "未找到 .dpd-lang 按钮");
+		assert.equal(typeof langButton.props.onClick, "function");
+	});
+	await langButton.props.onClick({ stopPropagation() {} });
+	const english = render();
+	check("点击 EN 后界面整体切换为英文", () => {
+		const text = textOf(english);
+		for (const label of ["Page range", "Output", "File naming", "Concurrency", "Progress", "Download again"]) {
+			assert.ok(text.includes(label), `缺少英文文案：${label}`);
+		}
+		assert.ok(!text.includes("任务进度"), "仍显示中文进度标题");
+		const okStat = findByClass(english, "dpd-stat");
+		assert.ok(okStat && textOf(okStat).trim() === "5 ok", `英文计数不正确：${okStat ? textOf(okStat) : "未找到统计条"}`);
+		assert.ok(text.includes("5 ok"), `英文计数不正确：${text.slice(-160)}`);
 	});
 }
 
@@ -749,7 +786,7 @@ const appFactoryOf = new Function(
 		() => new Promise(() => {}),
 		() => new Promise(() => {}),
 		(value, width) => String(value).padStart(width, "0"),
-		{},
+		{ __dpdLang: "zh" },
 		{ location: { href: "https://play.dlsite.com/" }, addEventListener() {}, dispatchEvent() {} },
 		{ pushState() {}, replaceState() {} },
 		{ body: { appendChild() {} }, createElement: () => ({ style: {}, click() {}, remove() {} }) },
@@ -1002,7 +1039,7 @@ check("油猴头已换成 fork 版元数据", () => {
 		"// ==UserScript==",
 		"// @name         DLscrape",
 		"// @namespace    https://github.com/operLin/DLscrape",
-		"// @version      2.4.0",
+		"// @version      2.5.0",
 		"// @author       cpufan,",
 		"// @license      MIT",
 		"// @match        https://play.dlsite.com/*",

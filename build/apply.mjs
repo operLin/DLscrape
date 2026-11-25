@@ -78,9 +78,9 @@ text = text.replace(beforeSetter, afterSetter);
 const FORK = {
 	name: "DLscrape",
 	author: "cpufan, operLin",
-	version: "2.4.0",
+	version: "2.5.0",
 	repo: "https://github.com/operLin/DLscrape",
-	description: "在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名、支持 comipo Play）"
+	description: "在浏览器完成DLsite Play漫画的下载、拼图或解密和保存（改进版：Material Design、页码范围、逐页、JPG/PNG、三种命名、中英文界面、支持 comipo Play）"
 };
 
 const headerRewrites = [
