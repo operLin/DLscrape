@@ -45,7 +45,7 @@
 
 - 每段替换前对**起始行做内容断言**，行号漂移时直接报错，而不是静默改错位置；
 - 上游产物 `upstream/` 始终字节不变，构建可复现、可 review；
-- `build/verify.mjs`（68 项：拼接完整性 + 内核行为 + UI 渲染 + 头部元数据）与 `build/dom-test.mjs`（32 项：真实 Vue + jsdom 集成测试）随仓库提供。
+- `build/verify.mjs`（72 项：拼接完整性 + 内核行为 + UI 渲染 + 头部元数据）与 `build/dom-test.mjs`（35 项：真实 Vue + jsdom 集成测试）随仓库提供。
 
 细节见 [build/README.md](build/README.md)。
 

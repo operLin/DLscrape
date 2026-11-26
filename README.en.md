@@ -47,7 +47,7 @@ Upstream only publishes a compiled artifact (a SystemJS bundle built with Vite +
 
 - every slice's **first line is content-asserted** before replacement, so line-number drift fails loudly instead of silently patching the wrong spot;
 - the upstream artifact in `upstream/` stays byte-identical, keeping the build reproducible and reviewable;
-- `build/verify.mjs` (68 checks: patch integrity + core behaviour + UI rendering + header metadata) and `build/dom-test.mjs` (32 checks: real Vue + jsdom integration tests) ship with the repo.
+- `build/verify.mjs` (72 checks: patch integrity + core behaviour + UI rendering + header metadata) and `build/dom-test.mjs` (35 checks: real Vue + jsdom integration tests) ship with the repo.
 
 Details in [build/README.md](build/README.md).
 
